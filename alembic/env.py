@@ -1,4 +1,6 @@
+from collections.abc import MutableMapping
 from logging.config import fileConfig
+from typing import Any
 
 from sqlalchemy import engine_from_config, pool
 
@@ -6,6 +8,7 @@ from alembic import context
 from app.core.config import get_settings
 from app.db import models  # noqa: F401  (registers tables on Base.metadata)
 from app.db.base import Base
+from app.db.partitions import is_partition_table
 
 config = context.config
 # ConfigParser treats % as interpolation, so escape it in URLs with encoded characters.
@@ -19,11 +22,18 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
 target_metadata = Base.metadata
 
 
+# Tell Alembic to ignore the daily vehicle_positions partitions. The poller creates them at runtime,
+# not migrations, so without this `alembic check` would report them as unexpected tables.
+def include_name(name: str | None, type_: str, parent_names: MutableMapping[str, Any]) -> bool:
+    return not (type_ == "table" and name is not None and is_partition_table(name))
+
+
 # Offline mode (`alembic upgrade head --sql`): print the SQL instead of connecting to a database.
 def run_migrations_offline() -> None:
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
+        include_name=include_name,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -39,7 +49,9 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection, target_metadata=target_metadata, include_name=include_name
+        )
         with context.begin_transaction():
             context.run_migrations()
 

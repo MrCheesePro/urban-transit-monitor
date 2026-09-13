@@ -2,7 +2,7 @@
 
 Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip updates), matches them against the static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Current milestone:** M2 (realtime polling, partitioned `vehicle_positions`, `vehicle_latest`, `GET /api/v1/routes/{id}/live`). M0 and M1 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
+**Current milestone:** M3 (trip matching, `stop_events`, observed arrivals, headway). M0, M1, and M2 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
@@ -45,7 +45,8 @@ tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
 - On-time window comes from config (default −60s to +300s). Never hardcode it.
 - Frequent routes (scheduled headway ≤ 15 min) are also judged on headway adherence and excess wait time.
 - CANCELED trips are excluded from delay averages and counted separately.
-- Severity: `on_time` (inside window), `minor` < 5 min, `major` < 15 min, `severe` ≥ 15 min.
+- Severity (config-driven): `on_time` inside the window, `early` before it, `minor` late up to 10 min, `major` up to 20 min, `severe` beyond, `unknown` with no estimate. Route severity uses the median delay of vehicles with an estimate.
+- MBTA realtime feeds have no `delay` field and often omit the vehicle's `start_date`. Many subway trips are `ADDED` with no timetable, so their delay is `None` (never guess).
 - Rankings weight by `sample_count` and skip routes below `min_samples`.
 
 ## Conventions
@@ -53,7 +54,7 @@ tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
 - Metric logic lives in `app/metrics` as pure functions with unit tests. No DB or network calls there.
 - All DB writes are idempotent: `INSERT ... ON CONFLICT` on each table's unique key. Jobs must be safe to re-run.
 - Every worker job takes a Postgres advisory lock and logs to `ingest_runs`.
-- `vehicle_positions` is range-partitioned by day. The retention job creates future partitions and drops old ones. Never `DELETE` rows from it.
+- `vehicle_positions` is range-partitioned by UTC day (`vehicle_positions_pYYYYMMDD`). The poller creates partitions as needed (`app/db/partitions.py`), the retention job (M5) drops old ones, and Alembic ignores them. Never `DELETE` rows from it.
 - Schema changes go only through Alembic migrations.
 - Tests never hit live MBTA endpoints. Use `tests/fixtures`.
 - API routes are versioned under `/api/v1`. Responses use Pydantic schemas from `app/api/schemas`.

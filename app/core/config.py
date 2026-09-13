@@ -16,21 +16,31 @@ class Settings(BaseSettings):
     mbta_trip_updates_url: str = "https://cdn.mbta.com/realtime/TripUpdates.pb"
     mbta_static_gtfs_url: str = "https://cdn.mbta.com/MBTA_GTFS.zip"
     http_timeout_seconds: float = 60.0
+    realtime_http_timeout_seconds: float = 15.0
 
     poll_interval_seconds: int = 60
     on_time_early_seconds: int = -60
     on_time_late_seconds: int = 300
+    severity_major_seconds: int = 600
+    severity_severe_seconds: int = 1200
+    live_vehicle_max_age_seconds: int = 300
+    feed_stale_after_seconds: int = 180
     frequent_headway_seconds: int = 900
     retention_days: int = 14
     ranking_min_samples: int = 200
     timezone: str = "America/New_York"
 
-    # Reject nonsense on-time windows at startup. "Early" must be zero or negative and "late"
-    # must be zero or positive, otherwise a perfectly punctual vehicle would count as late.
+    # Reject nonsense delay thresholds at startup. "Early" must be zero or negative and "late"
+    # must be zero or positive, otherwise a perfectly punctual vehicle would count as late. The
+    # severity cutoffs must then grow in order: late window <= major <= severe.
     @model_validator(mode="after")
     def check_on_time_window(self) -> Self:
         if not self.on_time_early_seconds <= 0 <= self.on_time_late_seconds:
             raise ValueError("on-time window must satisfy early <= 0 <= late")
+        if not (
+            self.on_time_late_seconds <= self.severity_major_seconds <= self.severity_severe_seconds
+        ):
+            raise ValueError("severity thresholds must satisfy late <= major <= severe")
         return self
 
 

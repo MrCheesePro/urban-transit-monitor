@@ -23,3 +23,9 @@ def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_rejects_window_not_containing_zero(early: int, late: int) -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, on_time_early_seconds=early, on_time_late_seconds=late)
+
+
+# Severity cutoffs out of order (major before the on-time window ends) are rejected.
+def test_rejects_severity_thresholds_out_of_order() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, on_time_late_seconds=300, severity_major_seconds=200)

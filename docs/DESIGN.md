@@ -40,7 +40,7 @@ Data sources:
 | 7 | Timezone and post-midnight trips ignored | `service_date` + GTFS seconds, `America/New_York`, UTC `timestamptz` |
 | 8 | Dedup key unspecified | UNIQUE `(vehicle_id, feed_timestamp)`. Skip poll if feed header timestamp unchanged |
 | 9 | ~1.4M raw rows/day | Daily range partitions, bulk inserts |
-| 10 | `/live` would scan raw table | `vehicle_latest` table + short TTL cache |
+| 10 | `/live` would scan raw table | `vehicle_latest` table indexed by route (add a TTL cache only if load requires it) |
 | 11 | Cancelled/added trips ignored | Store `schedule_relationship`. Exclude CANCELED from delay, count separately |
 | 12 | No failure handling | httpx timeouts/retries, `ingest_runs` log, advisory locks, staleness flag |
 | 13 | Rankings noisy for low-volume routes | Weight by `sample_count`, `min_samples` threshold |
@@ -66,13 +66,17 @@ feed_versions(id serial PK, version text UNIQUE, loaded_at timestamptz)
 ### Raw realtime
 ```sql
 vehicle_positions(
-  id bigint generated always as identity,
-  feed_timestamp timestamptz NOT NULL,
-  vehicle_id text NOT NULL, trip_id text, route_id text, direction_id smallint,
+  vehicle_id text, feed_timestamp timestamptz,
+  label text, trip_id text, route_id text, direction_id smallint, service_date date,
   stop_id text, stop_sequence int, current_status text, schedule_relationship text,
-  lat double precision, lon double precision, service_date date,
-  UNIQUE (vehicle_id, feed_timestamp)
-) PARTITION BY RANGE (feed_timestamp);   -- one partition per day
+  lat double precision, lon double precision, bearing double precision,
+  delay_seconds int,                          -- estimate at poll time, null if unknown
+  PRIMARY KEY (vehicle_id, feed_timestamp)    -- must include the partition key; also dedups
+) PARTITION BY RANGE (feed_timestamp);        -- vehicle_positions_pYYYYMMDD per UTC day
+-- index (route_id, feed_timestamp)
+
+realtime_feed_state(feed text PK, header_timestamp timestamptz, entity_count int,
+                    fetched_at timestamptz)  -- skip unchanged snapshots, report data age
 ```
 
 ### Derived
@@ -86,10 +90,9 @@ stop_events(
 )
 
 vehicle_latest(
-  vehicle_id text PK, trip_id text, route_id text, direction_id smallint,
-  stop_id text, current_status text, lat double precision, lon double precision,
-  delay_seconds int, feed_timestamp timestamptz, updated_at timestamptz
-)
+  vehicle_id text PK, <same snapshot columns as vehicle_positions>,
+  feed_timestamp timestamptz, updated_at timestamptz
+)  -- upsert only moves forward in time; index on route_id
 ```
 
 ### Aggregates
@@ -117,7 +120,8 @@ ingest_runs(id bigint PK, job text, started_at timestamptz, finished_at timestam
 - **Headway CV:** stddev(headway) / mean(headway) per bucket. 0 = perfectly even.
 - **Excess wait time:** average rider wait from actual headways minus average wait from scheduled headways. Rider wait ≈ E[h²] / (2·E[h]).
 - **Frequent route:** scheduled headway ≤ 15 min. Rank these primarily on headway metrics.
-- **Severity (live):** `on_time` inside the window, `minor` < 5 min, `major` < 15 min, `severe` ≥ 15 min.
+- **Live delay estimate:** for each vehicle, take its trip's first non-skipped predicted stop at or after the vehicle's `current_stop_sequence`, then predicted time minus scheduled time for that stop. If the trip has no `start_date`, try the local date of the prediction and the day before, and keep the smaller delay. `ADDED` trips have no timetable, so their delay is null.
+- **Severity (live):** `on_time` inside the window, `early` before it, `minor` late up to `SEVERITY_MAJOR_SECONDS` (600), `major` up to `SEVERITY_SEVERE_SECONDS` (1200), `severe` beyond, `unknown` without an estimate. Route severity = severity of the median known delay.
 
 ## Worker jobs (APScheduler, one process)
 | Job | Schedule | Details |
@@ -133,13 +137,13 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 | Endpoint | Returns |
 |---|---|
 | `GET /routes` | route list |
-| `GET /routes/{id}/live` | vehicles (position, delay, severity), route summary, `data_age_seconds` |
+| `GET /routes/{id}/live?direction_id=` | vehicles seen in the last `LIVE_VEHICLE_MAX_AGE_SECONDS` (position, delay, severity), route summary, `as_of`, `data_age_seconds`, `stale`; 404 for unknown routes |
 | `GET /routes/{id}/historical?direction=&from=&to=` | 7×24 grid (day of week × hour): avg delay, on-time %, headway CV, samples |
 | `GET /performance/rankings?days=30&metric=on_time\|delay\|headway&min_samples=200` | routes ordered most → least reliable, weighted by samples |
 | `GET /health` | DB status, seconds since last successful poll |
 
 ## Configuration (env, pydantic-settings)
-`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
+`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
 
 ## Testing
 - Unit: pure functions in `app/metrics` (matching, delay, headway, aggregation), including post-midnight trips and cancelled trips.

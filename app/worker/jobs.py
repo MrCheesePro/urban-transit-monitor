@@ -4,8 +4,9 @@ from typing import Literal
 
 from sqlalchemy import Engine, text
 
+from app.core.config import get_settings
 from app.db.session import get_engine
-from app.gtfs import static_loader
+from app.gtfs import realtime, realtime_ingest, static_loader
 
 logger = logging.getLogger(__name__)
 
@@ -75,4 +76,20 @@ def load_static_gtfs_job() -> JobStatus:
     engine = get_engine()
     return run_job(
         engine, "load_static_gtfs", lambda: static_loader.download_and_load(engine).total_rows
+    )
+
+
+# Scheduled job (every POLL_INTERVAL_SECONDS): download the live vehicle positions and trip updates
+# and store them. Records the number of vehicles stored (0 when the snapshot was unchanged).
+def poll_realtime_job() -> JobStatus:
+    engine = get_engine()
+    settings = get_settings()
+
+    # Download one realtime feed, using the shorter realtime timeout so a hung request cannot
+    # overlap the next poll.
+    def fetch(url: str) -> bytes:
+        return realtime.fetch_feed_bytes(url, settings.realtime_http_timeout_seconds)
+
+    return run_job(
+        engine, "poll_realtime", lambda: realtime_ingest.poll_once(engine, settings, fetch).vehicles
     )

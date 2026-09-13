@@ -2,7 +2,7 @@
 
 Monitors MBTA GTFS-Realtime feeds, detects delays and headway gaps against the published schedule, and serves hourly route reliability metrics over a REST API.
 
-Status: **M1 complete (static timetable loader and `GET /api/v1/routes`), M2 next**. See [docs/DESIGN.md](docs/DESIGN.md) for architecture, schema, and milestones.
+Status: **M2 complete (live vehicle polling and `GET /api/v1/routes/{id}/live`), M3 next**. See [docs/DESIGN.md](docs/DESIGN.md) for architecture, schema, and milestones.
 
 ## Quick start
 

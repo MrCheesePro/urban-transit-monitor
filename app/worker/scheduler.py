@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 # Build the scheduler and register every background job with its timetable. Times use the agency
 # timezone (America/New_York), so "hour=3" means 3 AM in Boston regardless of the server's clock.
 def build_scheduler() -> BlockingScheduler:
-    timezone = ZoneInfo(get_settings().timezone)
+    settings = get_settings()
+    timezone = ZoneInfo(settings.timezone)
     scheduler = BlockingScheduler(timezone=timezone)
 
     # Static timetable: run once right away (so a fresh database gets data) and then daily at 03:00.
@@ -30,7 +32,19 @@ def build_scheduler() -> BlockingScheduler:
         misfire_grace_time=3600,
     )
 
-    # Registered in later milestones: poll_realtime (M2), aggregate_hourly (M4), retention (M5).
+    # Live vehicles: every POLL_INTERVAL_SECONDS, starting right away. A run that would overlap a
+    # still-running poll is skipped rather than queued.
+    scheduler.add_job(
+        jobs.poll_realtime_job,
+        IntervalTrigger(seconds=settings.poll_interval_seconds, timezone=timezone),
+        id="poll_realtime",
+        next_run_time=dt.datetime.now(timezone),
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=settings.poll_interval_seconds,
+    )
+
+    # Registered in later milestones: aggregate_hourly (M4), retention (M5).
     return scheduler
 
 

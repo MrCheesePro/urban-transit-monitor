@@ -127,3 +127,65 @@ class IngestRun(Base):
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     rows: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None]
+
+
+# Realtime tables. Filled by the poll_realtime job from the GTFS-Realtime feeds.
+
+
+# Columns shared by vehicle_positions and vehicle_latest: everything known about one vehicle at
+# one moment. delay_seconds is our estimate (positive = late), None when it cannot be computed.
+class _VehicleSnapshotColumns:
+    label: Mapped[str | None]
+    trip_id: Mapped[str | None]
+    route_id: Mapped[str | None]
+    direction_id: Mapped[int | None] = mapped_column(SmallInteger)
+    service_date: Mapped[dt.date | None] = mapped_column(Date)
+    stop_id: Mapped[str | None]
+    stop_sequence: Mapped[int | None] = mapped_column(Integer)
+    current_status: Mapped[str | None]
+    schedule_relationship: Mapped[str | None]
+    lat: Mapped[float | None] = mapped_column(Float)
+    lon: Mapped[float | None] = mapped_column(Float)
+    bearing: Mapped[float | None] = mapped_column(Float)
+    delay_seconds: Mapped[int | None] = mapped_column(Integer)
+
+
+# Raw history: one row per vehicle per feed snapshot. The table is partitioned into one child table
+# per UTC day (vehicle_positions_pYYYYMMDD) so old days can be dropped instantly; the poller creates
+# each day's partition before inserting. The primary key includes feed_timestamp because Postgres
+# requires the partition column in it, and it also stops the same snapshot being stored twice.
+class VehiclePosition(_VehicleSnapshotColumns, Base):
+    __tablename__ = "vehicle_positions"
+    __table_args__ = (
+        Index("ix_vehicle_positions_route_id_feed_timestamp", "route_id", "feed_timestamp"),
+        {"postgresql_partition_by": "RANGE (feed_timestamp)"},
+    )
+
+    vehicle_id: Mapped[str] = mapped_column(primary_key=True)
+    feed_timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+
+
+# The newest known state of each vehicle, one row per vehicle, overwritten on every poll. The live
+# API reads this small table instead of scanning the large history table.
+class VehicleLatest(_VehicleSnapshotColumns, Base):
+    __tablename__ = "vehicle_latest"
+
+    vehicle_id: Mapped[str] = mapped_column(primary_key=True)
+    route_id: Mapped[str | None] = mapped_column(index=True)
+    feed_timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# Last snapshot seen from each realtime feed ("vehicle_positions", "trip_updates"). Used to skip a
+# poll when the agency has not published anything new, and to report how old the live data is.
+class RealtimeFeedState(Base):
+    __tablename__ = "realtime_feed_state"
+
+    feed: Mapped[str] = mapped_column(primary_key=True)
+    header_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    entity_count: Mapped[int] = mapped_column(Integer)
+    fetched_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
