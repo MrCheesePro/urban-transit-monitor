@@ -25,7 +25,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://transit:transit@localhost:5432/transit
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0  # this action publishes no floating major tag
         with:
           enable-cache: true
       - run: uv sync --frozen
