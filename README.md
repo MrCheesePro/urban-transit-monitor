@@ -2,7 +2,7 @@
 
 Monitors MBTA GTFS-Realtime feeds, detects delays and headway gaps against the published schedule, and serves hourly route reliability metrics over a REST API.
 
-Status: **M0 scaffold complete, M1 next**. See [docs/DESIGN.md](docs/DESIGN.md) for architecture, schema, and milestones.
+Status: **M1 complete (static timetable loader and `GET /api/v1/routes`), M2 next**. See [docs/DESIGN.md](docs/DESIGN.md) for architecture, schema, and milestones.
 
 ## Quick start
 
@@ -13,6 +13,7 @@ cp .env.example .env
 docker compose up -d db
 uv sync
 uv run alembic upgrade head
+uv run python -m app.gtfs.static_loader      # load the MBTA timetable (about a minute)
 uv run uvicorn app.api.main:app --reload     # http://localhost:8000/docs
 uv run python -m app.worker.scheduler        # background jobs
 ```

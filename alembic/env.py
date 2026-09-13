@@ -11,12 +11,15 @@ config = context.config
 # ConfigParser treats % as interpolation, so escape it in URLs with encoded characters.
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
-if config.config_file_name is not None:
+# Tests run migrations in-process and set configure_logger=False so Alembic does not replace
+# the test runner's logging setup.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
 
+# Offline mode (`alembic upgrade head --sql`): print the SQL instead of connecting to a database.
 def run_migrations_offline() -> None:
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
@@ -28,6 +31,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Online mode (the normal case): connect to the database and apply migrations inside a transaction.
 def run_migrations_online() -> None:
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),

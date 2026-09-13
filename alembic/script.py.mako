@@ -8,6 +8,7 @@ Create Date: ${create_date}
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 ${imports if imports else ""}
 
@@ -17,9 +18,11 @@ branch_labels: str | Sequence[str] | None = ${repr(branch_labels)}
 depends_on: str | Sequence[str] | None = ${repr(depends_on)}
 
 
+# Apply this migration's schema changes.
 def upgrade() -> None:
     ${upgrades if upgrades else "pass"}
 
 
+# Reverse upgrade(), returning the schema to the previous revision.
 def downgrade() -> None:
     ${downgrades if downgrades else "pass"}

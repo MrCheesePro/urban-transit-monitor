@@ -2,7 +2,7 @@
 
 Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip updates), matches them against the static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Current milestone:** M1 (static GTFS loader, `GET /api/v1/routes`). M0 scaffold is done. Milestones M0–M5 are listed in docs/DESIGN.md.
+**Current milestone:** M2 (realtime polling, partitioned `vehicle_positions`, `vehicle_latest`, `GET /api/v1/routes/{id}/live`). M0 and M1 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
@@ -14,12 +14,13 @@ Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip up
 ## Commands
 ```bash
 cp .env.example .env                             # first time only
-docker compose up -d db                          # Postgres on host port 5433 (5432 is a local Postgres)
+docker compose up -d db                          # Postgres on host port 5434 (5432 and 5433 are taken)
 uv sync                                          # install deps
 uv run alembic upgrade head                      # apply migrations
 uv run alembic revision --autogenerate -m "msg"  # new migration
 uv run uvicorn app.api.main:app --reload         # API on :8000
 uv run python -m app.worker.scheduler            # background jobs
+uv run python -m app.gtfs.static_loader          # load MBTA static GTFS now (--file PATH, --force)
 uv run pytest                                    # all tests
 uv run ruff check . && uv run mypy app           # lint + types
 ```
@@ -48,6 +49,7 @@ tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
 - Rankings weight by `sample_count` and skip routes below `min_samples`.
 
 ## Conventions
+- Every function, method, and class (including tests, fixtures, and nested helpers) gets a `#` comment directly above its `def` or `class` line. Explain in plain English what it does and why, plus any non-obvious behavior (edge cases, locking, units). The owner reads these to understand the code later, so write for someone new to the project. Update the comment whenever the code changes.
 - Metric logic lives in `app/metrics` as pure functions with unit tests. No DB or network calls there.
 - All DB writes are idempotent: `INSERT ... ON CONFLICT` on each table's unique key. Jobs must be safe to re-run.
 - Every worker job takes a Postgres advisory lock and logs to `ingest_runs`.

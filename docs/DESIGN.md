@@ -50,11 +50,14 @@ Data sources:
 
 ### Static GTFS
 ```sql
-routes(route_id text PK, agency_id text, route_short_name text, route_long_name text, route_type smallint)
-trips(trip_id text PK, route_id text FK, service_id text, direction_id smallint, shape_id text)
-stops(stop_id text PK, stop_name text, lat double precision, lon double precision, parent_station text)
+routes(route_id text PK, agency_id text, route_short_name text, route_long_name text,
+       route_type smallint, route_sort_order int)
+trips(trip_id text PK, route_id text FK, service_id text, direction_id smallint,
+      trip_headsign text, shape_id text)
+stops(stop_id text PK, stop_name text, lat double precision, lon double precision,
+      location_type smallint, parent_station text)
 stop_times(trip_id text, stop_sequence int, stop_id text, arrival_secs int, departure_secs int,
-           PRIMARY KEY (trip_id, stop_sequence))
+           PRIMARY KEY (trip_id, stop_sequence))   -- no FK to trips: keeps ~4M-row reloads fast
 calendar(service_id text PK, monday..sunday bool, start_date date, end_date date)
 calendar_dates(service_id text, date date, exception_type smallint, PRIMARY KEY (service_id, date))
 feed_versions(id serial PK, version text UNIQUE, loaded_at timestamptz)
