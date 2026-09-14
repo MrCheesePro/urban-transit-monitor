@@ -39,7 +39,7 @@ def test_iter_rows_missing_optional_column(make_gtfs_zip: GtfsZipFactory) -> Non
     zip_path = make_gtfs_zip({"routes.txt": "route_id,route_type\nRed,1\n"})
     with zipfile.ZipFile(zip_path) as zf:
         rows = list(iter_rows(zf, SPECS["routes.txt"]))
-    assert rows == [("Red", None, None, None, 1, None)]
+    assert rows == [("Red", None, None, None, 1, None, None, None)]
 
 
 # Bad values report the file and line number.

@@ -3,11 +3,12 @@
 import datetime as dt
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Connection, Engine, Table, bindparam, func, select, tuple_, update
+from sqlalchemy import Connection, Engine, Row, Table, bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import Settings
@@ -139,6 +140,44 @@ def _upsert_events(conn: Connection, rows: list[dict[str, Any]]) -> None:
     )
 
 
+_GROUP_EVENTS_SQL = text(
+    """
+    SELECT events.trip_id, events.service_date, events.stop_sequence, events.route_id,
+           events.direction_id, events.stop_id, events.observed_arrival, events.scheduled_arrival,
+           events.headway_seconds, events.scheduled_headway_seconds
+    FROM stop_events AS events
+    JOIN unnest(
+        CAST(:route_ids AS text[]),
+        CAST(:direction_ids AS smallint[]),
+        CAST(:stop_ids AS text[])
+    ) AS wanted(route_id, direction_id, stop_id)
+      ON events.route_id = wanted.route_id
+     AND events.direction_id = wanted.direction_id
+     AND events.stop_id = wanted.stop_id
+    WHERE events.observed_arrival >= :since
+    """
+)
+
+
+# Load the stop events at these (route, direction, stop) groups that arrived at or after `since`.
+# The groups are sent as three parallel arrays and joined with unnest. A literal
+# "(route, direction, stop) IN (...)" list does not work here: at full daytime service it has
+# thousands of entries and Postgres fails with "stack depth limit exceeded".
+def load_group_events(
+    conn: Connection, groups: set[tuple[str, int, str]], since: dt.datetime
+) -> Sequence[Row[Any]]:
+    ordered = sorted(groups)
+    return conn.execute(
+        _GROUP_EVENTS_SQL,
+        {
+            "route_ids": [group[0] for group in ordered],
+            "direction_ids": [group[1] for group in ordered],
+            "stop_ids": [group[2] for group in ordered],
+            "since": since,
+        },
+    ).all()
+
+
 # Recompute headways for every (route, direction, stop) touched by this run. History from before
 # the earliest new arrival is loaded too, so that arrival can find the vehicle ahead of it, but only
 # rows at or after that arrival are updated (earlier headways cannot change), and only if they
@@ -153,26 +192,7 @@ def _recompute_headways(conn: Connection, rows: list[dict[str, Any]]) -> int:
         return 0
     earliest = min(row["observed_arrival"] for row in rows)
     history_start = earliest - dt.timedelta(seconds=MAX_HEADWAY_SECONDS)
-
-    existing = conn.execute(
-        select(
-            StopEvent.trip_id,
-            StopEvent.service_date,
-            StopEvent.stop_sequence,
-            StopEvent.route_id,
-            StopEvent.direction_id,
-            StopEvent.stop_id,
-            StopEvent.observed_arrival,
-            StopEvent.scheduled_arrival,
-            StopEvent.headway_seconds,
-            StopEvent.scheduled_headway_seconds,
-        ).where(
-            tuple_(StopEvent.route_id, StopEvent.direction_id, StopEvent.stop_id).in_(
-                sorted(groups)
-            ),
-            StopEvent.observed_arrival >= history_start,
-        )
-    ).all()
+    existing = load_group_events(conn, groups, history_start)
 
     headways = compute_headways(
         StopVisit(

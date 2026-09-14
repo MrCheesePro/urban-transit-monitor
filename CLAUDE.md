@@ -2,14 +2,15 @@
 
 Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip updates), matches them against the static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Status:** milestones M0 through M5 are done. Open items are listed under "Open items" in docs/DESIGN.md. Milestones M0–M5 are listed in docs/DESIGN.md.
+**Status:** milestones M0 through M5 are done, plus the Linecheck website in `web/`. Open items are listed under "Open items" in docs/DESIGN.md. Milestones M0–M5 are listed in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
 - FastAPI + Pydantic v2 (API), pydantic-settings (config)
 - SQLAlchemy 2 + psycopg 3, Alembic migrations, PostgreSQL 16
 - APScheduler (single `worker` process), httpx, `gtfs-realtime-bindings`
-- pytest, ruff, mypy; Docker Compose (`db`, `api`, `worker`); GitHub Actions CI
+- pytest, ruff, mypy; Docker Compose (`db`, `migrate`, `api`, `worker`, `web`); GitHub Actions CI
+- Website (`web/`): React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui, TanStack Query, React Router, Leaflet with OpenStreetMap tiles; fonts bundled locally with Fontsource; served by nginx in Docker
 
 ## Commands
 ```bash
@@ -24,6 +25,11 @@ uv run python -m app.gtfs.static_loader          # load MBTA static GTFS now (--
 uv run python -m app.pipeline.aggregate --hours 48  # rebuild hourly performance for recent hours
 uv run pytest                                    # all tests
 uv run ruff check . && uv run mypy app           # lint + types
+
+cd web && npm ci                                 # website dependencies
+npm run dev                                      # website on :5173, proxies /api and /health to :8000
+npm run lint && npm run build                    # website lint, type check, production build
+docker compose up --build                        # everything; website on :8080, API on :8000
 ```
 
 ## Layout
@@ -38,6 +44,10 @@ app/worker/            scheduler.py, jobs.py (load_static_gtfs, poll_realtime, d
 app/api/               main.py, routers/, schemas/
 alembic/               migrations
 tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
+web/src/pages/         one component per page (Home, Lines, LineLive, LineHistory, Rankings, Status, Methodology, Privacy, Terms, NotFound)
+web/src/components/    shared pieces (layout, common, WeeklyGrid, VehicleMap, LineHeader); ui/ holds shadcn/ui primitives
+web/src/lib/           api.ts (types + fetch), queries.ts (TanStack Query hooks), format.ts, grid.ts, site.ts
+web/nginx.conf         production routing: /api and /health to the api container, everything else to index.html
 ```
 
 ## Domain rules
@@ -55,7 +65,9 @@ tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
 - Cancelled trips are not recorded yet, so no metric may claim to count them.
 
 ## Conventions
-- Every function, method, and class (including tests, fixtures, and nested helpers) gets a `#` comment directly above its `def` or `class` line. Explain in plain English what it does and why, plus any non-obvious behavior (edge cases, locking, units). The owner reads these to understand the code later, so write for someone new to the project. Update the comment whenever the code changes.
+- Every function, method, and class (including tests, fixtures, and nested helpers) gets a `#` comment directly above its `def` or `class` line. Explain in plain English what it does and why, plus any non-obvious behavior (edge cases, locking, units). The owner reads these to understand the code later, so write for someone new to the project. Update the comment whenever the code changes. In TypeScript use `//` comments the same way, above every function, component, and hook, including the shadcn/ui files in `web/src/components/ui`.
+- Website data comes only from the API through `web/src/lib/queries.ts`. Every page handles loading, error (with a working retry), and empty states, and never shows a number the API did not return.
+- Database lookups by many keys at once must pass the keys as arrays and join with `unnest`, never as a literal `(a, b) IN ((...), ...)` list: at full daytime service those lists reach thousands of entries and Postgres fails with "stack depth limit exceeded".
 - Metric logic lives in `app/metrics` as pure functions with unit tests. No DB or network calls there.
 - All DB writes are idempotent: `INSERT ... ON CONFLICT` on each table's unique key, or (for recomputed aggregates) delete and rewrite a time window inside one transaction. Jobs must be safe to re-run.
 - Every worker job takes a Postgres advisory lock and logs to `ingest_runs`.

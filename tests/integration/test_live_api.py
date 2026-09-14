@@ -33,6 +33,7 @@ def _seed(engine: Engine, age_seconds: int = 30) -> None:
             "route_id": "Red",
             "direction_id": 1,
             "start_date": f"{service_date:%Y%m%d}",
+            "stop_id": "70061",
             "stop_sequence": 2,
             "timestamp": stamp,
         },
@@ -67,9 +68,12 @@ def test_live_route(engine: Engine) -> None:
     assert body["route_long_name"] == "Red Line"
     assert body["stale"] is False
     assert 0 <= body["data_age_seconds"] < 120
-    assert [(v["vehicle_id"], v["delay_seconds"], v["severity"]) for v in body["vehicles"]] == [
-        ("R-2", None, "unknown"),
-        ("R-1", 400, "minor"),
+    assert [
+        (v["vehicle_id"], v["delay_seconds"], v["severity"], v["stop_name"])
+        for v in body["vehicles"]
+    ] == [
+        ("R-2", None, "unknown", None),
+        ("R-1", 400, "minor", "Alewife Red Line platform"),
     ]
     assert body["summary"] == {
         "vehicle_count": 2,

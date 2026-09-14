@@ -52,6 +52,8 @@ TABLE_SPECS: tuple[TableSpec, ...] = (
             ("route_long_name", "route_long_name", p.optional_text),
             ("route_type", "route_type", p.required_int),
             ("route_sort_order", "route_sort_order", p.optional_int),
+            ("route_color", "route_color", p.optional_text),
+            ("route_text_color", "route_text_color", p.optional_text),
         ),
     ),
     TableSpec(

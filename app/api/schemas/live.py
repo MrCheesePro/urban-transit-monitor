@@ -14,6 +14,7 @@ class LiveVehicleOut(BaseModel):
     direction_id: int | None
     service_date: dt.date | None
     stop_id: str | None
+    stop_name: str | None
     stop_sequence: int | None
     current_status: str | None
     schedule_relationship: str | None

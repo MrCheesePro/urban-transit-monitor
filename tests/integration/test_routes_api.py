@@ -22,6 +22,8 @@ def test_lists_routes_in_sort_order(loaded_feed: LoadResult) -> None:
         "route_long_name": "Red Line",
         "route_type": 1,
         "route_sort_order": 10010,
+        "route_color": "DA291C",
+        "route_text_color": "FFFFFF",
     }
 
 

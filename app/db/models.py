@@ -35,6 +35,8 @@ class Route(Base):
     route_long_name: Mapped[str | None]
     route_type: Mapped[int] = mapped_column(SmallInteger)
     route_sort_order: Mapped[int | None] = mapped_column(Integer)
+    route_color: Mapped[str | None]  # hex without "#", e.g. "DA291C" for the Red Line
+    route_text_color: Mapped[str | None]  # readable text color on top of route_color
 
 
 # One scheduled run of a vehicle along a route (e.g. the 7:05 AM Red Line to Ashmont).

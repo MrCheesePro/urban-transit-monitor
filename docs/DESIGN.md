@@ -51,7 +51,8 @@ Data sources:
 ### Static GTFS
 ```sql
 routes(route_id text PK, agency_id text, route_short_name text, route_long_name text,
-       route_type smallint, route_sort_order int)
+       route_type smallint, route_sort_order int,
+       route_color text, route_text_color text)   -- hex without "#", used for website badges
 trips(trip_id text PK, route_id text FK, service_id text, direction_id smallint,
       trip_headsign text, shape_id text)
 stops(stop_id text PK, stop_name text, lat double precision, lon double precision,
@@ -150,6 +151,7 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 | `GET /routes/{id}/live?direction_id=` | vehicles seen in the last `LIVE_VEHICLE_MAX_AGE_SECONDS` (position, delay, severity), route summary, `as_of`, `data_age_seconds`, `stale`; 404 for unknown routes |
 | `GET /routes/{id}/historical?direction_id=&start_date=&end_date=` | all 168 cells of the local day-of-week × hour grid (sample counts, avg and absolute delay, on-time %, avg headway, headway CV, excess wait) plus a period summary; local inclusive dates, default last 30 days, max 366; 404 unknown route, 422 bad range |
 | `GET /performance/rankings?metric=on_time\|delay\|headway&days=30&min_samples=&route_type=&limit=` | routes ordered most → least reliable over complete hours, both directions combined, with `excluded_routes` for those below `min_samples`; days 1-90 |
+| `GET /system/live` | network-wide snapshot of vehicles seen in the last `LIVE_VEHICLE_MAX_AGE_SECONDS`: severity counts, median and worst delay, the same per mode (route_type), data age |
 | `GET /health` | always 200; `status` ok only if the database is up and every job is ok. Per job: `state` (ok, failing = latest finished run failed, stale = no success within its max age, never_run), last status, last success, seconds since success, last error |
 
 ## Configuration (env, pydantic-settings)
@@ -174,4 +176,25 @@ All of M0 through M5 are complete.
 ## Open items
 - Record CANCELED trips from trip updates so cancellations can be counted per hour.
 - ADDED trips (common on MBTA subway) have no timetable, so they get no delay and no stop events. Headway for them could be measured from vehicle positions alone.
-- Optional map dashboard. Any web UI must follow the frontend and content rules in CLAUDE.md (separate pages, privacy policy and terms, custom domain, no invented numbers).
+- Direction names: `directions.txt` (for example "Inbound" and "Outbound") is not loaded, so the website says "Direction 0" and "Direction 1".
+- Deployment to a custom domain. The website currently runs locally only.
+
+## Website (Linecheck)
+A React single-page app in `web/`, served by nginx in Docker at `http://localhost:8080` (or by Vite at `:5173` during development). nginx forwards `/api` and `/health` to the api container, so the browser only ever talks to one origin and the API needs no CORS setup.
+
+| Page | Address | Data |
+|---|---|---|
+| Home | `/` | `/system/live` (network now, by mode), `/performance/rankings?days=1&min_samples=50` (most and least reliable) |
+| Lines | `/lines` | `/routes`, grouped by mode with search |
+| Line live | `/lines/{id}` | `/routes/{id}/live` every 30 s: map, vehicle table with stop names, summary |
+| Line history | `/lines/{id}/history` | `/routes/{id}/historical`: period totals and the weekly day-by-hour grid |
+| Rankings | `/rankings` | `/performance/rankings`, filters kept in the address bar |
+| Status | `/status` | `/health` every 30 s |
+| How it works, Privacy Policy, Terms & Conditions | `/how-it-works`, `/privacy`, `/terms` | static text |
+
+Design: pale station-tile ground, ink text, a separate six-color severity scale (so it never collides with MBTA line colors, which only appear on route badges from `routes.route_color`), Big Shoulders Display for headings, Public Sans for text, IBM Plex Mono for numbers. Solid colors only; no scroll animations. The weekly grid is a real `<table>` so screen readers announce day and hour for every cell.
+
+The live endpoint joins `stops` so vehicles are described by stop name ("Stopped at Harvard"); MBTA `stop_sequence` values jump in tens, so they are never shown to riders.
+
+## Implementation notes
+- Lookups by many keys (the poller's `(trip_id, stop_sequence)` schedule lookup and the headway recomputation's `(route_id, direction_id, stop_id)` groups) pass parallel arrays joined with `unnest`. The first version used a literal tuple `IN (...)` list, which worked in tests and overnight but failed at daytime scale with "stack depth limit exceeded". `tests/integration/test_large_key_lists.py` guards against it with 5,000 keys.

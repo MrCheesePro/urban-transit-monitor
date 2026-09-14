@@ -42,5 +42,12 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  web:
+    build: ./web
+    ports:
+      - "8080:80"  # website at http://localhost:8080; nginx forwards /api and /health to api
+    depends_on:
+      - api
+
 volumes:
   pgdata:

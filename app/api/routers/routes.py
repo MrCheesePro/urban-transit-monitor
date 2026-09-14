@@ -8,13 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.freshness import vehicle_feed_freshness
 from app.api.schemas.live import LiveRouteOut, LiveSummaryOut, LiveVehicleOut
 from app.api.schemas.performance import HistoricalCellOut, HistoricalRouteOut, PerformanceOut
 from app.api.schemas.routes import RouteOut
 from app.core.config import get_settings
-from app.db.models import RealtimeFeedState, Route, RouteHourlyPerformance, VehicleLatest
+from app.db.models import Route, RouteHourlyPerformance, Stop, VehicleLatest
 from app.db.session import get_session
-from app.gtfs.realtime import VEHICLE_POSITIONS_FEED
 from app.metrics.aggregate import DAY_NAMES, HourlyPerformance, combine_hours
 from app.metrics.delay import classify_severity, severity_thresholds, summarize_fleet
 
@@ -54,21 +54,19 @@ def live_route(
     settings = get_settings()
     now = dt.datetime.now(dt.UTC)
     cutoff = now - dt.timedelta(seconds=settings.live_vehicle_max_age_seconds)
+    # Each vehicle with the name of the stop it is at or heading to (None if the stop is unknown).
     statement = (
-        select(VehicleLatest)
+        select(VehicleLatest, Stop.stop_name)
+        .outerjoin(Stop, Stop.stop_id == VehicleLatest.stop_id)
         .where(VehicleLatest.route_id == route_id, VehicleLatest.feed_timestamp >= cutoff)
         .order_by(VehicleLatest.direction_id, VehicleLatest.vehicle_id)
     )
     if direction_id is not None:
         statement = statement.where(VehicleLatest.direction_id == direction_id)
-    vehicles = list(session.scalars(statement))
+    rows = session.execute(statement).all()
+    vehicles = [vehicle for vehicle, _ in rows]
 
-    as_of = session.scalar(
-        select(RealtimeFeedState.header_timestamp).where(
-            RealtimeFeedState.feed == VEHICLE_POSITIONS_FEED
-        )
-    )
-    data_age = round((now - as_of).total_seconds()) if as_of is not None else None
+    freshness = vehicle_feed_freshness(session, settings, now)
     thresholds = severity_thresholds(settings)
     summary = summarize_fleet([vehicle.delay_seconds for vehicle in vehicles], thresholds)
 
@@ -77,9 +75,9 @@ def live_route(
         route_short_name=route.route_short_name,
         route_long_name=route.route_long_name,
         route_type=route.route_type,
-        as_of=as_of,
-        data_age_seconds=data_age,
-        stale=data_age is None or data_age > settings.feed_stale_after_seconds,
+        as_of=freshness.as_of,
+        data_age_seconds=freshness.data_age_seconds,
+        stale=freshness.stale,
         summary=LiveSummaryOut.model_validate(summary, from_attributes=True),
         vehicles=[
             LiveVehicleOut(
@@ -89,6 +87,7 @@ def live_route(
                 direction_id=vehicle.direction_id,
                 service_date=vehicle.service_date,
                 stop_id=vehicle.stop_id,
+                stop_name=stop_name,
                 stop_sequence=vehicle.stop_sequence,
                 current_status=vehicle.current_status,
                 schedule_relationship=vehicle.schedule_relationship,
@@ -99,7 +98,7 @@ def live_route(
                 severity=classify_severity(vehicle.delay_seconds, thresholds),
                 feed_timestamp=vehicle.feed_timestamp,
             )
-            for vehicle in vehicles
+            for vehicle, stop_name in rows
         ],
     )
 

@@ -8,11 +8,11 @@ from dataclasses import asdict, dataclass
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Connection, Engine, func, select, tuple_
+from sqlalchemy import Connection, Engine, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import Settings
-from app.db.models import RealtimeFeedState, StopTime, VehicleLatest, VehiclePosition
+from app.db.models import RealtimeFeedState, VehicleLatest, VehiclePosition
 from app.db.partitions import ensure_partitions
 from app.gtfs import realtime as rt
 from app.metrics.delay import estimate_delay, next_stop_prediction
@@ -50,17 +50,33 @@ def fetch_both(settings: Settings, fetch: Fetcher) -> tuple[bytes, bytes | None]
     return vehicle_bytes, trip_bytes
 
 
+_SCHEDULE_FOR_PAIRS_SQL = text(
+    """
+    SELECT times.trip_id, times.stop_sequence, times.arrival_secs, times.departure_secs
+    FROM stop_times AS times
+    JOIN unnest(CAST(:trip_ids AS text[]), CAST(:stop_sequences AS integer[]))
+         AS wanted(trip_id, stop_sequence)
+      ON times.trip_id = wanted.trip_id AND times.stop_sequence = wanted.stop_sequence
+    """
+)
+
+
 # Look up the scheduled (arrival_secs, departure_secs) for many (trip_id, stop_sequence) pairs in a
-# single query, instead of one query per vehicle.
+# single query, instead of one query per vehicle. The pairs are sent as two parallel arrays and
+# joined with unnest, because a literal "(trip_id, stop_sequence) IN (...)" list with thousands of
+# pairs makes Postgres fail with "stack depth limit exceeded".
 def load_schedule(
     conn: Connection, pairs: set[tuple[str, int]]
 ) -> dict[tuple[str, int], tuple[int | None, int | None]]:
     if not pairs:
         return {}
+    ordered = sorted(pairs)
     rows = conn.execute(
-        select(
-            StopTime.trip_id, StopTime.stop_sequence, StopTime.arrival_secs, StopTime.departure_secs
-        ).where(tuple_(StopTime.trip_id, StopTime.stop_sequence).in_(sorted(pairs)))
+        _SCHEDULE_FOR_PAIRS_SQL,
+        {
+            "trip_ids": [trip_id for trip_id, _ in ordered],
+            "stop_sequences": [sequence for _, sequence in ordered],
+        },
     )
     return {
         (row.trip_id, row.stop_sequence): (row.arrival_secs, row.departure_secs) for row in rows

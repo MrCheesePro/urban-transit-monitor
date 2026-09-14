@@ -11,3 +11,5 @@ class RouteOut(BaseModel):
     route_long_name: str | None
     route_type: int
     route_sort_order: int | None
+    route_color: str | None
+    route_text_color: str | None
