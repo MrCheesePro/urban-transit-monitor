@@ -2,7 +2,7 @@
 
 Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip updates), matches them against the static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Current milestone:** M5 (retention job, `ingest_runs` in `/health`, README with diagram and screenshots). M0 through M4 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
+**Status:** milestones M0 through M5 are done. Open items are listed under "Open items" in docs/DESIGN.md. Milestones M0–M5 are listed in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
@@ -29,11 +29,12 @@ uv run ruff check . && uv run mypy app           # lint + types
 ## Layout
 ```
 app/core/config.py     settings from env (feed URLs, on-time window, retention days)
+app/core/job_health.py rules for when a job counts as ok, failing, stale, or never_run (/health)
 app/db/                models.py, session.py, partitions.py (daily vehicle_positions partitions)
 app/gtfs/              static_loader.py (GTFS zip), realtime.py (fetch + protobuf decode), realtime_ingest.py (poll_once)
 app/metrics/           delay.py, arrivals.py, headway.py, aggregate.py (pure functions)
-app/pipeline/          stop_events.py, aggregate.py (database orchestration for derived tables)
-app/worker/            scheduler.py, jobs.py (load_static_gtfs, poll_realtime, derive_stop_events, aggregate_hourly; retention in M5)
+app/pipeline/          stop_events.py, aggregate.py, retention.py (database orchestration for derived tables)
+app/worker/            scheduler.py, jobs.py (load_static_gtfs, poll_realtime, derive_stop_events, aggregate_hourly, retention)
 app/api/               main.py, routers/, schemas/
 alembic/               migrations
 tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
@@ -58,7 +59,9 @@ tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
 - Metric logic lives in `app/metrics` as pure functions with unit tests. No DB or network calls there.
 - All DB writes are idempotent: `INSERT ... ON CONFLICT` on each table's unique key, or (for recomputed aggregates) delete and rewrite a time window inside one transaction. Jobs must be safe to re-run.
 - Every worker job takes a Postgres advisory lock and logs to `ingest_runs`.
-- `vehicle_positions` is range-partitioned by UTC day (`vehicle_positions_pYYYYMMDD`). The poller creates partitions as needed (`app/db/partitions.py`), the retention job (M5) drops old ones, and Alembic ignores them. Never `DELETE` rows from it.
+- `vehicle_positions` is range-partitioned by UTC day (`vehicle_positions_pYYYYMMDD`). The poller and the retention job create partitions (`app/db/partitions.py`), the retention job drops expired ones, and Alembic ignores them. Never `DELETE` rows from it.
+- Retention (daily job, all config-driven): vehicle_positions 14 days, stop_events 90 days, route_hourly_performance 400 days (so a full-year `/historical` range still has data), ingest_runs 30 days, vehicle_latest 24 hours. Other tables are deleted from in small batches, each in its own transaction.
+- A new scheduled job must be added to `JOB_NAMES` and `job_max_ages` in `app/core/job_health.py`, or `/health` will not report it (a unit test checks this).
 - Schema changes go only through Alembic migrations.
 - Tests never hit live MBTA endpoints. Use `tests/fixtures`.
 - API routes are versioned under `/api/v1`. Responses use Pydantic schemas from `app/api/schemas`.

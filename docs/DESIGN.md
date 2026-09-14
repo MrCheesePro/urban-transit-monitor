@@ -139,7 +139,7 @@ ingest_runs(id bigint PK, job text, started_at timestamptz, finished_at timestam
 | `derive_stop_events` | every 5 min | Trips with positions in the last 15 min: load their last 4 h of positions and timetable, estimate arrivals, upsert `stop_events`, recompute headways for the touched stops |
 | `aggregate_hourly` | startup + hourly at :15 | Recompute the last `AGGREGATE_LOOKBACK_HOURS` (3) complete hours from `stop_events`: delete and rewrite that window in one transaction |
 | `load_static_gtfs` | startup + daily 03:00 | Download zip, load in a transaction only if the version changed |
-| `retention` | daily 04:00 | Create next 3 days of partitions, drop partitions older than `RETENTION_DAYS` (14) |
+| `retention` | startup + daily 04:00 | Create partitions for today and the next `PARTITION_DAYS_AHEAD` (3) days, drop partitions older than `RETENTION_DAYS` (14), batch-delete stop_events older than 90 days, hourly rows older than 400 days, ingest_runs older than 30 days, and vehicle_latest rows not seen for 24 hours |
 
 Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and writes an `ingest_runs` row.
 
@@ -150,10 +150,10 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 | `GET /routes/{id}/live?direction_id=` | vehicles seen in the last `LIVE_VEHICLE_MAX_AGE_SECONDS` (position, delay, severity), route summary, `as_of`, `data_age_seconds`, `stale`; 404 for unknown routes |
 | `GET /routes/{id}/historical?direction_id=&start_date=&end_date=` | all 168 cells of the local day-of-week × hour grid (sample counts, avg and absolute delay, on-time %, avg headway, headway CV, excess wait) plus a period summary; local inclusive dates, default last 30 days, max 366; 404 unknown route, 422 bad range |
 | `GET /performance/rankings?metric=on_time\|delay\|headway&days=30&min_samples=&route_type=&limit=` | routes ordered most → least reliable over complete hours, both directions combined, with `excluded_routes` for those below `min_samples`; days 1-90 |
-| `GET /health` | DB status, seconds since last successful poll |
+| `GET /health` | always 200; `status` ok only if the database is up and every job is ok. Per job: `state` (ok, failing = latest finished run failed, stale = no success within its max age, never_run), last status, last success, seconds since success, last error |
 
 ## Configuration (env, pydantic-settings)
-`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `STOP_EVENTS_INTERVAL_SECONDS=300`, `STOP_EVENTS_ACTIVE_WINDOW_MINUTES=15`, `STOP_EVENTS_HISTORY_HOURS=4`, `STOP_EVENT_MAX_GAP_SECONDS=600`, `AGGREGATE_LOOKBACK_HOURS=3`, `HISTORICAL_DEFAULT_DAYS=30`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
+`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `STOP_EVENTS_INTERVAL_SECONDS=300`, `STOP_EVENTS_ACTIVE_WINDOW_MINUTES=15`, `STOP_EVENTS_HISTORY_HOURS=4`, `STOP_EVENT_MAX_GAP_SECONDS=600`, `AGGREGATE_LOOKBACK_HOURS=3`, `HISTORICAL_DEFAULT_DAYS=30`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `PARTITION_DAYS_AHEAD=3`, `STOP_EVENTS_RETENTION_DAYS=90`, `HOURLY_PERFORMANCE_RETENTION_DAYS=400`, `INGEST_RUNS_RETENTION_DAYS=30`, `VEHICLE_LATEST_RETENTION_HOURS=24`, `RETENTION_BATCH_SIZE=10000`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
 
 ## Testing
 - Unit: pure functions in `app/metrics` (matching, delay, headway, aggregation), including post-midnight trips and cancelled trips.
@@ -162,9 +162,16 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 - Never call live MBTA endpoints in tests.
 
 ## Milestones
+All of M0 through M5 are complete.
+
 - **M0** Scaffold: pyproject (uv), docker-compose, config, Alembic, CI (ruff, mypy, pytest).
 - **M1** Static GTFS loader, `GET /routes`.
 - **M2** Realtime polling, partitioned `vehicle_positions`, `vehicle_latest`, `GET /routes/{id}/live`.
 - **M3** Trip matching, `stop_events`, delay and headway, with fixture-based tests.
 - **M4** Hourly aggregation, `/historical`, `/performance/rankings`.
-- **M5** Retention, `ingest_runs`, `/health`, README with diagram and screenshots. Optional map dashboard.
+- **M5** Retention, `ingest_runs`, `/health`, README with diagram and screenshots.
+
+## Open items
+- Record CANCELED trips from trip updates so cancellations can be counted per hour.
+- ADDED trips (common on MBTA subway) have no timetable, so they get no delay and no stop events. Headway for them could be measured from vehicle positions alone.
+- Optional map dashboard. Any web UI must follow the frontend and content rules in CLAUDE.md (separate pages, privacy policy and terms, custom domain, no invented numbers).

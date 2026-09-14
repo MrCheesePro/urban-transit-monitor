@@ -1,3 +1,4 @@
+from app.core.job_health import JOB_NAMES
 from app.worker.scheduler import build_scheduler
 
 
@@ -29,3 +30,12 @@ def test_aggregate_hourly_job_registered() -> None:
     job = build_scheduler().get_job("aggregate_hourly")
     assert job is not None
     assert "minute='15'" in str(job.trigger)
+
+
+# The worker runs retention daily at 04:00, and every job /health knows about is scheduled.
+def test_retention_job_registered_and_all_jobs_known() -> None:
+    scheduler = build_scheduler()
+    job = scheduler.get_job("retention")
+    assert job is not None
+    assert "hour='4'" in str(job.trigger)
+    assert {job.id for job in scheduler.get_jobs()} == set(JOB_NAMES)

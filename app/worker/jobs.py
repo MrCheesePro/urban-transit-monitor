@@ -7,7 +7,7 @@ from sqlalchemy import Engine, text
 from app.core.config import get_settings
 from app.db.session import get_engine
 from app.gtfs import realtime, realtime_ingest, static_loader
-from app.pipeline import aggregate, stop_events
+from app.pipeline import aggregate, retention, stop_events
 
 logger = logging.getLogger(__name__)
 
@@ -115,4 +115,14 @@ def aggregate_hourly_job() -> JobStatus:
     settings = get_settings()
     return run_job(
         engine, "aggregate_hourly", lambda: aggregate.aggregate_recent(engine, settings).rows
+    )
+
+
+# Scheduled job (daily at 04:00): pre-create upcoming partitions and remove data past its retention
+# period. Records the number of rows deleted plus partitions dropped.
+def retention_job() -> JobStatus:
+    engine = get_engine()
+    settings = get_settings()
+    return run_job(
+        engine, "retention", lambda: retention.apply_retention(engine, settings).total_removed
     )

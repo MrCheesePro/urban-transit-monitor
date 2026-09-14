@@ -32,7 +32,13 @@ class Settings(BaseSettings):
     aggregate_lookback_hours: int = 3
     historical_default_days: int = 30
     frequent_headway_seconds: int = 900
-    retention_days: int = 14
+    retention_days: int = 14  # vehicle_positions partitions
+    partition_days_ahead: int = 3
+    stop_events_retention_days: int = 90
+    hourly_performance_retention_days: int = 400
+    ingest_runs_retention_days: int = 30
+    vehicle_latest_retention_hours: int = 24
+    retention_batch_size: int = 10000
     ranking_min_samples: int = 200
     timezone: str = "America/New_York"
 

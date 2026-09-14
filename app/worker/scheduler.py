@@ -67,7 +67,17 @@ def build_scheduler() -> BlockingScheduler:
         misfire_grace_time=3600,
     )
 
-    # Registered in a later milestone: retention (M5).
+    # Retention: daily at 04:00, the quietest time for MBTA service, and once right away so a fresh
+    # worker has its upcoming partitions created and shows a recent run in /health.
+    scheduler.add_job(
+        jobs.retention_job,
+        CronTrigger(hour=4, minute=0, timezone=timezone),
+        id="retention",
+        next_run_time=dt.datetime.now(timezone),
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
     return scheduler
 
 
