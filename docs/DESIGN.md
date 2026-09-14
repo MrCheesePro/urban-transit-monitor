@@ -41,7 +41,7 @@ Data sources:
 | 8 | Dedup key unspecified | UNIQUE `(vehicle_id, feed_timestamp)`. Skip poll if feed header timestamp unchanged |
 | 9 | ~1.4M raw rows/day | Daily range partitions, bulk inserts |
 | 10 | `/live` would scan raw table | `vehicle_latest` table indexed by route (add a TTL cache only if load requires it) |
-| 11 | Cancelled/added trips ignored | Store `schedule_relationship`. Exclude CANCELED from delay, count separately |
+| 11 | Cancelled/added trips ignored | Store `schedule_relationship`; ADDED trips get no delay. Recording CANCELED trips from trip updates is still open, so no metric counts them |
 | 12 | No failure handling | httpx timeouts/retries, `ingest_runs` log, advisory locks, staleness flag |
 | 13 | Rankings noisy for low-volume routes | Weight by `sample_count`, `min_samples` threshold |
 | 14 | "FastAPI / Express" undecided | FastAPI |
@@ -99,13 +99,16 @@ vehicle_latest(
 ### Aggregates
 ```sql
 route_hourly_performance(
-  id bigint PK, route_id text, direction_id smallint,
-  hour_bucket timestamptz, day_of_week smallint, hour_of_day smallint,   -- local time
-  avg_delay_seconds real, p90_delay_seconds real, on_time_percentage real,
-  avg_headway_seconds real, headway_cv real, excess_wait_seconds real,
-  cancelled_trips int, sample_count int,
-  UNIQUE (route_id, direction_id, hour_bucket)
-)
+  route_id text, direction_id smallint, hour_bucket timestamptz,   -- PRIMARY KEY; UTC hour
+  day_of_week smallint, hour_of_day smallint,                      -- local time, 0 = Monday
+  sample_count int,                                                -- events with a delay
+  avg_delay_seconds double, avg_abs_delay_seconds double, p90_delay_seconds double,
+  on_time_percentage double,
+  headway_sample_count int,                                        -- events with a headway
+  avg_headway_seconds double, avg_scheduled_headway_seconds double,
+  headway_cv double, excess_wait_seconds double,
+  updated_at timestamptz
+)  -- index (hour_bucket). No cancelled_trips column: cancellations are not recorded yet.
 ```
 
 ### Ops
@@ -120,7 +123,10 @@ ingest_runs(id bigint PK, job text, started_at timestamptz, finished_at timestam
 - **Observed arrival:** each snapshot places a vehicle at a position along its trip (stopped at stop i = i, in transit to stop i = i - 0.5; progress never goes backwards). A stop's arrival lies between the last snapshot before it and the first at or past it: the midpoint if the vehicle is caught stopped there, otherwise interpolated by scheduled time between the two positions. Skipped: the first stop, stops already passed when first seen, and stops whose surrounding snapshots are more than `STOP_EVENT_MAX_GAP_SECONDS` apart. Error is at most one poll interval.
 - **Service date without start_date:** the local date of the first matching snapshot or the day before, whichever is closer to the timetable.
 - **Headway:** gap between consecutive observed arrivals at the same stop, route, and direction. Gaps over 3 hours are service breaks. The scheduled headway is the planned gap between the same two trips, dropped if bunching reversed their order.
-- **Headway CV:** stddev(headway) / mean(headway) per bucket. 0 = perfectly even.
+- **Headway CV:** population stddev(headway) / mean(headway) per hour, needs 2+ headways. 0 = perfectly even.
+- **Hourly delay figures:** `avg_delay_seconds` (signed), `avg_abs_delay_seconds` (early counts against reliability too), `p90_delay_seconds` (linear interpolation), `on_time_percentage` (share inside the on-time window).
+- **Combining hours** (grid cells, period summaries, rankings): delay figures weighted by `sample_count`, headway figures by `headway_sample_count`. On-time %, average delay, and average headway are exact; headway CV and excess wait are sample-weighted means of hourly values.
+- **Rankings:** `on_time` highest first, `delay` lowest average absolute delay first, `headway` lowest CV first (requires `min_samples` headways). Ties: more samples, then route_id.
 - **Excess wait time:** average rider wait from actual headways minus average wait from scheduled headways. Rider wait ≈ E[h²] / (2·E[h]).
 - **Frequent route:** scheduled headway ≤ 15 min. Rank these primarily on headway metrics.
 - **Live delay estimate:** for each vehicle, take its trip's first non-skipped predicted stop at or after the vehicle's `current_stop_sequence`, then predicted time minus scheduled time for that stop. If the trip has no `start_date`, try the local date of the prediction and the day before, and keep the smaller delay. `ADDED` trips have no timetable, so their delay is null.
@@ -131,7 +137,7 @@ ingest_runs(id bigint PK, job text, started_at timestamptz, finished_at timestam
 |---|---|---|
 | `poll_realtime` | every 60s | Fetch both feeds concurrently. Skip if header timestamp unchanged. Bulk insert positions, upsert `vehicle_latest`, estimate live delay |
 | `derive_stop_events` | every 5 min | Trips with positions in the last 15 min: load their last 4 h of positions and timetable, estimate arrivals, upsert `stop_events`, recompute headways for the touched stops |
-| `aggregate_hourly` | hourly at :15 | Recompute the last 3 hour buckets, upsert |
+| `aggregate_hourly` | startup + hourly at :15 | Recompute the last `AGGREGATE_LOOKBACK_HOURS` (3) complete hours from `stop_events`: delete and rewrite that window in one transaction |
 | `load_static_gtfs` | startup + daily 03:00 | Download zip, load in a transaction only if the version changed |
 | `retention` | daily 04:00 | Create next 3 days of partitions, drop partitions older than `RETENTION_DAYS` (14) |
 
@@ -142,12 +148,12 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 |---|---|
 | `GET /routes` | route list |
 | `GET /routes/{id}/live?direction_id=` | vehicles seen in the last `LIVE_VEHICLE_MAX_AGE_SECONDS` (position, delay, severity), route summary, `as_of`, `data_age_seconds`, `stale`; 404 for unknown routes |
-| `GET /routes/{id}/historical?direction=&from=&to=` | 7×24 grid (day of week × hour): avg delay, on-time %, headway CV, samples |
-| `GET /performance/rankings?days=30&metric=on_time\|delay\|headway&min_samples=200` | routes ordered most → least reliable, weighted by samples |
+| `GET /routes/{id}/historical?direction_id=&start_date=&end_date=` | all 168 cells of the local day-of-week × hour grid (sample counts, avg and absolute delay, on-time %, avg headway, headway CV, excess wait) plus a period summary; local inclusive dates, default last 30 days, max 366; 404 unknown route, 422 bad range |
+| `GET /performance/rankings?metric=on_time\|delay\|headway&days=30&min_samples=&route_type=&limit=` | routes ordered most → least reliable over complete hours, both directions combined, with `excluded_routes` for those below `min_samples`; days 1-90 |
 | `GET /health` | DB status, seconds since last successful poll |
 
 ## Configuration (env, pydantic-settings)
-`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `STOP_EVENTS_INTERVAL_SECONDS=300`, `STOP_EVENTS_ACTIVE_WINDOW_MINUTES=15`, `STOP_EVENTS_HISTORY_HOURS=4`, `STOP_EVENT_MAX_GAP_SECONDS=600`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
+`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `STOP_EVENTS_INTERVAL_SECONDS=300`, `STOP_EVENTS_ACTIVE_WINDOW_MINUTES=15`, `STOP_EVENTS_HISTORY_HOURS=4`, `STOP_EVENT_MAX_GAP_SECONDS=600`, `AGGREGATE_LOOKBACK_HOURS=3`, `HISTORICAL_DEFAULT_DAYS=30`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
 
 ## Testing
 - Unit: pure functions in `app/metrics` (matching, delay, headway, aggregation), including post-midnight trips and cancelled trips.

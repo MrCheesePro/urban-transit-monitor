@@ -2,7 +2,7 @@
 
 Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip updates), matches them against the static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Current milestone:** M4 (hourly aggregation, `GET /api/v1/routes/{id}/historical`, `GET /api/v1/performance/rankings`). M0 through M3 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
+**Current milestone:** M5 (retention job, `ingest_runs` in `/health`, README with diagram and screenshots). M0 through M4 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
@@ -21,6 +21,7 @@ uv run alembic revision --autogenerate -m "msg"  # new migration
 uv run uvicorn app.api.main:app --reload         # API on :8000
 uv run python -m app.worker.scheduler            # background jobs
 uv run python -m app.gtfs.static_loader          # load MBTA static GTFS now (--file PATH, --force)
+uv run python -m app.pipeline.aggregate --hours 48  # rebuild hourly performance for recent hours
 uv run pytest                                    # all tests
 uv run ruff check . && uv run mypy app           # lint + types
 ```
@@ -30,9 +31,9 @@ uv run ruff check . && uv run mypy app           # lint + types
 app/core/config.py     settings from env (feed URLs, on-time window, retention days)
 app/db/                models.py, session.py, partitions.py (daily vehicle_positions partitions)
 app/gtfs/              static_loader.py (GTFS zip), realtime.py (fetch + protobuf decode), realtime_ingest.py (poll_once)
-app/metrics/           delay.py, arrivals.py, headway.py (pure functions; aggregate.py comes in M4)
-app/pipeline/          stop_events.py (database orchestration for derived tables)
-app/worker/            scheduler.py, jobs.py (load_static_gtfs, poll_realtime, derive_stop_events; aggregate_hourly and retention later)
+app/metrics/           delay.py, arrivals.py, headway.py, aggregate.py (pure functions)
+app/pipeline/          stop_events.py, aggregate.py (database orchestration for derived tables)
+app/worker/            scheduler.py, jobs.py (load_static_gtfs, poll_realtime, derive_stop_events, aggregate_hourly; retention in M5)
 app/api/               main.py, routers/, schemas/
 alembic/               migrations
 tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
@@ -45,16 +46,17 @@ tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
 - MBTA feeds usually omit `delay`. Delay = observed or predicted arrival − scheduled arrival, matched on `trip_id` + `stop_sequence`.
 - On-time window comes from config (default −60s to +300s). Never hardcode it.
 - Frequent routes (scheduled headway ≤ 15 min) are also judged on headway adherence and excess wait time.
-- CANCELED trips are excluded from delay averages and counted separately.
 - Severity (config-driven): `on_time` inside the window, `early` before it, `minor` late up to 10 min, `major` up to 20 min, `severe` beyond, `unknown` with no estimate. Route severity uses the median delay of vehicles with an estimate.
 - MBTA realtime feeds have no `delay` field and often omit the vehicle's `start_date`. Many subway trips are `ADDED` with no timetable, so their delay is `None` (never guess), and they produce no `stop_events`.
 - Feeds never say when a vehicle reached a stop. `app/metrics/arrivals.py` estimates it between polls: the midpoint when a vehicle is caught stopped at the stop, schedule-weighted interpolation when it passed the stop between polls. The first stop of a trip never gets an arrival. Headway compares consecutive arrivals at the same route, direction, and stop.
-- Rankings weight by `sample_count` and skip routes below `min_samples`.
+- Hourly buckets are UTC hours; `day_of_week` (0 = Monday) and `hour_of_day` are local time. Combining hours weights delay figures by `sample_count` and headway figures by `headway_sample_count`.
+- Rankings (both directions combined) skip routes below `min_samples`: `on_time` highest share first, `delay` smallest average absolute delay first, `headway` lowest headway CV first. The database only sums; averaging and ordering live in `app/metrics/aggregate.py`.
+- Cancelled trips are not recorded yet, so no metric may claim to count them.
 
 ## Conventions
 - Every function, method, and class (including tests, fixtures, and nested helpers) gets a `#` comment directly above its `def` or `class` line. Explain in plain English what it does and why, plus any non-obvious behavior (edge cases, locking, units). The owner reads these to understand the code later, so write for someone new to the project. Update the comment whenever the code changes.
 - Metric logic lives in `app/metrics` as pure functions with unit tests. No DB or network calls there.
-- All DB writes are idempotent: `INSERT ... ON CONFLICT` on each table's unique key. Jobs must be safe to re-run.
+- All DB writes are idempotent: `INSERT ... ON CONFLICT` on each table's unique key, or (for recomputed aggregates) delete and rewrite a time window inside one transaction. Jobs must be safe to re-run.
 - Every worker job takes a Postgres advisory lock and logs to `ingest_runs`.
 - `vehicle_positions` is range-partitioned by UTC day (`vehicle_positions_pYYYYMMDD`). The poller creates partitions as needed (`app/db/partitions.py`), the retention job (M5) drops old ones, and Alembic ignores them. Never `DELETE` rows from it.
 - Schema changes go only through Alembic migrations.

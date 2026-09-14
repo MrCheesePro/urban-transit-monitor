@@ -82,13 +82,16 @@ def engine() -> Iterator[Engine]:
     _clear_app_caches()
 
 
-# Empty the realtime tables (including every vehicle_positions partition) before a test, so vehicles
-# stored by an earlier test cannot leak into this one.
+# Empty the realtime and derived tables (including every vehicle_positions partition) before a test,
+# so data stored by an earlier test cannot leak into this one.
 @pytest.fixture
 def clean_realtime(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(
-            text("TRUNCATE vehicle_positions, vehicle_latest, realtime_feed_state, stop_events")
+            text(
+                "TRUNCATE vehicle_positions, vehicle_latest, realtime_feed_state, stop_events, "
+                "route_hourly_performance"
+            )
         )
 
 

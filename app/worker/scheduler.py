@@ -55,7 +55,19 @@ def build_scheduler() -> BlockingScheduler:
         misfire_grace_time=settings.stop_events_interval_seconds,
     )
 
-    # Registered in later milestones: aggregate_hourly (M4), retention (M5).
+    # Hourly performance: at 15 minutes past every hour, once stop events for the previous hour have
+    # been derived. Also runs right away so a restarted worker catches up on recent hours.
+    scheduler.add_job(
+        jobs.aggregate_hourly_job,
+        CronTrigger(minute=15, timezone=timezone),
+        id="aggregate_hourly",
+        next_run_time=dt.datetime.now(timezone),
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
+    # Registered in a later milestone: retention (M5).
     return scheduler
 
 

@@ -217,6 +217,33 @@ class StopEvent(Base):
     )
 
 
+# Reliability of one route in one direction during one UTC hour, rebuilt by the aggregate_hourly
+# job from stop_events. day_of_week (0 = Monday) and hour_of_day are the bucket's local time in the
+# agency timezone. See app/metrics/aggregate.py for how each figure is computed.
+class RouteHourlyPerformance(Base):
+    __tablename__ = "route_hourly_performance"
+    __table_args__ = (Index("ix_route_hourly_performance_hour_bucket", "hour_bucket"),)
+
+    route_id: Mapped[str] = mapped_column(primary_key=True)
+    direction_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    hour_bucket: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    day_of_week: Mapped[int] = mapped_column(SmallInteger)
+    hour_of_day: Mapped[int] = mapped_column(SmallInteger)
+    sample_count: Mapped[int] = mapped_column(Integer)
+    avg_delay_seconds: Mapped[float | None] = mapped_column(Float)
+    avg_abs_delay_seconds: Mapped[float | None] = mapped_column(Float)
+    p90_delay_seconds: Mapped[float | None] = mapped_column(Float)
+    on_time_percentage: Mapped[float | None] = mapped_column(Float)
+    headway_sample_count: Mapped[int] = mapped_column(Integer)
+    avg_headway_seconds: Mapped[float | None] = mapped_column(Float)
+    avg_scheduled_headway_seconds: Mapped[float | None] = mapped_column(Float)
+    headway_cv: Mapped[float | None] = mapped_column(Float)
+    excess_wait_seconds: Mapped[float | None] = mapped_column(Float)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 # Last snapshot seen from each realtime feed ("vehicle_positions", "trip_updates"). Used to skip a
 # poll when the agency has not published anything new, and to report how old the live data is.
 class RealtimeFeedState(Base):

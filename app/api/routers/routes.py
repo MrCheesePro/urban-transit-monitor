@@ -1,17 +1,24 @@
 import datetime as dt
+from collections import defaultdict
+from dataclasses import asdict, fields
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas.live import LiveRouteOut, LiveSummaryOut, LiveVehicleOut
+from app.api.schemas.performance import HistoricalCellOut, HistoricalRouteOut, PerformanceOut
 from app.api.schemas.routes import RouteOut
 from app.core.config import get_settings
-from app.db.models import RealtimeFeedState, Route, VehicleLatest
+from app.db.models import RealtimeFeedState, Route, RouteHourlyPerformance, VehicleLatest
 from app.db.session import get_session
 from app.gtfs.realtime import VEHICLE_POSITIONS_FEED
+from app.metrics.aggregate import DAY_NAMES, HourlyPerformance, combine_hours
 from app.metrics.delay import classify_severity, severity_thresholds, summarize_fleet
+
+MAX_HISTORICAL_DAYS = 366
 
 router = APIRouter(prefix="/api/v1/routes", tags=["routes"])
 
@@ -93,5 +100,81 @@ def live_route(
                 feed_timestamp=vehicle.feed_timestamp,
             )
             for vehicle in vehicles
+        ],
+    )
+
+
+# Copy a route_hourly_performance row into the HourlyPerformance dataclass the metrics code uses.
+def _hourly_from_row(row: RouteHourlyPerformance) -> HourlyPerformance:
+    return HourlyPerformance(
+        **{field.name: getattr(row, field.name) for field in fields(HourlyPerformance)}
+    )
+
+
+# GET /api/v1/routes/{route_id}/historical: average reliability by local day of week and hour of
+# day, for use as a weekly heatmap. start_date and end_date are inclusive dates in the agency
+# timezone; by default the last HISTORICAL_DEFAULT_DAYS days ending today. The response always has
+# all 168 cells (Monday 00:00 first), with sample_count 0 and nulls where there was no data, plus a
+# summary for the whole period. Optional ?direction_id= keeps one direction; otherwise both are
+# combined. Returns 404 for unknown routes and 422 for reversed or over-long date ranges.
+@router.get("/{route_id}/historical", response_model=HistoricalRouteOut)
+def historical_route(
+    route_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    direction_id: Annotated[
+        int | None, Query(ge=0, le=1, description="0 or 1; omit for both")
+    ] = None,
+    start_date: Annotated[dt.date | None, Query(description="first local date, inclusive")] = None,
+    end_date: Annotated[dt.date | None, Query(description="last local date, inclusive")] = None,
+) -> HistoricalRouteOut:
+    route = session.get(Route, route_id)
+    if route is None:
+        raise HTTPException(status_code=404, detail=f"route {route_id!r} not found")
+
+    settings = get_settings()
+    timezone = ZoneInfo(settings.timezone)
+    last_day = end_date or dt.datetime.now(timezone).date()
+    first_day = start_date or last_day - dt.timedelta(days=settings.historical_default_days - 1)
+    if first_day > last_day:
+        raise HTTPException(status_code=422, detail="start_date must be on or before end_date")
+    if (last_day - first_day).days + 1 > MAX_HISTORICAL_DAYS:
+        raise HTTPException(
+            status_code=422, detail=f"date range can cover at most {MAX_HISTORICAL_DAYS} days"
+        )
+
+    period_start = dt.datetime.combine(first_day, dt.time(), tzinfo=timezone)
+    period_end = dt.datetime.combine(last_day + dt.timedelta(days=1), dt.time(), tzinfo=timezone)
+    statement = select(RouteHourlyPerformance).where(
+        RouteHourlyPerformance.route_id == route_id,
+        RouteHourlyPerformance.hour_bucket >= period_start,
+        RouteHourlyPerformance.hour_bucket < period_end,
+    )
+    if direction_id is not None:
+        statement = statement.where(RouteHourlyPerformance.direction_id == direction_id)
+    hours = [_hourly_from_row(row) for row in session.scalars(statement)]
+
+    by_cell: dict[tuple[int, int], list[HourlyPerformance]] = defaultdict(list)
+    for hour in hours:
+        by_cell[(hour.day_of_week, hour.hour_of_day)].append(hour)
+
+    return HistoricalRouteOut(
+        route_id=route.route_id,
+        route_short_name=route.route_short_name,
+        route_long_name=route.route_long_name,
+        route_type=route.route_type,
+        direction_id=direction_id,
+        start_date=first_day,
+        end_date=last_day,
+        timezone=settings.timezone,
+        summary=PerformanceOut(**asdict(combine_hours(hours))),
+        cells=[
+            HistoricalCellOut(
+                day_of_week=day,
+                day_name=DAY_NAMES[day],
+                hour_of_day=hour_of_day,
+                **asdict(combine_hours(by_cell.get((day, hour_of_day), []))),
+            )
+            for day in range(7)
+            for hour_of_day in range(24)
         ],
     )

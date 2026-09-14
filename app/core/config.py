@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     stop_events_active_window_minutes: int = 15
     stop_events_history_hours: int = 4
     stop_event_max_gap_seconds: int = 600
+    aggregate_lookback_hours: int = 3
+    historical_default_days: int = 30
     frequent_headway_seconds: int = 900
     retention_days: int = 14
     ranking_min_samples: int = 200

@@ -7,7 +7,7 @@ from sqlalchemy import Engine, text
 from app.core.config import get_settings
 from app.db.session import get_engine
 from app.gtfs import realtime, realtime_ingest, static_loader
-from app.pipeline import stop_events
+from app.pipeline import aggregate, stop_events
 
 logger = logging.getLogger(__name__)
 
@@ -105,4 +105,14 @@ def derive_stop_events_job() -> JobStatus:
         engine,
         "derive_stop_events",
         lambda: stop_events.derive_stop_events(engine, settings).events,
+    )
+
+
+# Scheduled job (hourly at :15): rebuild route_hourly_performance for the most recent complete hours
+# from stop_events. Records the number of hourly rows written.
+def aggregate_hourly_job() -> JobStatus:
+    engine = get_engine()
+    settings = get_settings()
+    return run_job(
+        engine, "aggregate_hourly", lambda: aggregate.aggregate_recent(engine, settings).rows
     )

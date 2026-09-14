@@ -22,3 +22,10 @@ def test_derive_stop_events_job_registered() -> None:
     job = build_scheduler().get_job("derive_stop_events")
     assert job is not None
     assert "0:05:00" in str(job.trigger)
+
+
+# The worker aggregates hourly performance at 15 minutes past every hour.
+def test_aggregate_hourly_job_registered() -> None:
+    job = build_scheduler().get_job("aggregate_hourly")
+    assert job is not None
+    assert "minute='15'" in str(job.trigger)
