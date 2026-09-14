@@ -82,12 +82,13 @@ realtime_feed_state(feed text PK, header_timestamp timestamptz, entity_count int
 ### Derived
 ```sql
 stop_events(
-  trip_id text, service_date date, stop_sequence int,
-  route_id text, direction_id smallint, stop_id text,
-  scheduled_arrival timestamptz, observed_arrival timestamptz,
+  trip_id text, service_date date, stop_sequence int,   -- PRIMARY KEY
+  route_id text, direction_id smallint, stop_id text, vehicle_id text,
+  observed_arrival timestamptz, scheduled_arrival timestamptz,
   delay_seconds int, headway_seconds int, scheduled_headway_seconds int,
-  UNIQUE (trip_id, service_date, stop_sequence)
-)
+  updated_at timestamptz
+)  -- indexes: (route_id, direction_id, stop_id, observed_arrival), (observed_arrival)
+-- not partitioned: roughly 500k rows/day at full service; revisit if retention grows
 
 vehicle_latest(
   vehicle_id text PK, <same snapshot columns as vehicle_positions>,
@@ -116,7 +117,9 @@ ingest_runs(id bigint PK, job text, started_at timestamptz, finished_at timestam
 ## Metric definitions
 - **Delay:** `observed_arrival − scheduled_arrival` in seconds. Positive = late.
 - **On-time:** delay within `[ON_TIME_EARLY_SECONDS, ON_TIME_LATE_SECONDS]`, default `[-60, 300]`.
-- **Headway:** gap between consecutive observed arrivals at the same stop, route, and direction.
+- **Observed arrival:** each snapshot places a vehicle at a position along its trip (stopped at stop i = i, in transit to stop i = i - 0.5; progress never goes backwards). A stop's arrival lies between the last snapshot before it and the first at or past it: the midpoint if the vehicle is caught stopped there, otherwise interpolated by scheduled time between the two positions. Skipped: the first stop, stops already passed when first seen, and stops whose surrounding snapshots are more than `STOP_EVENT_MAX_GAP_SECONDS` apart. Error is at most one poll interval.
+- **Service date without start_date:** the local date of the first matching snapshot or the day before, whichever is closer to the timetable.
+- **Headway:** gap between consecutive observed arrivals at the same stop, route, and direction. Gaps over 3 hours are service breaks. The scheduled headway is the planned gap between the same two trips, dropped if bunching reversed their order.
 - **Headway CV:** stddev(headway) / mean(headway) per bucket. 0 = perfectly even.
 - **Excess wait time:** average rider wait from actual headways minus average wait from scheduled headways. Rider wait ≈ E[h²] / (2·E[h]).
 - **Frequent route:** scheduled headway ≤ 15 min. Rank these primarily on headway metrics.
@@ -126,7 +129,8 @@ ingest_runs(id bigint PK, job text, started_at timestamptz, finished_at timestam
 ## Worker jobs (APScheduler, one process)
 | Job | Schedule | Details |
 |---|---|---|
-| `poll_realtime` | every 60s | Fetch both feeds concurrently. Skip if header timestamp unchanged. Bulk insert positions, upsert `vehicle_latest`, derive `stop_events` |
+| `poll_realtime` | every 60s | Fetch both feeds concurrently. Skip if header timestamp unchanged. Bulk insert positions, upsert `vehicle_latest`, estimate live delay |
+| `derive_stop_events` | every 5 min | Trips with positions in the last 15 min: load their last 4 h of positions and timetable, estimate arrivals, upsert `stop_events`, recompute headways for the touched stops |
 | `aggregate_hourly` | hourly at :15 | Recompute the last 3 hour buckets, upsert |
 | `load_static_gtfs` | startup + daily 03:00 | Download zip, load in a transaction only if the version changed |
 | `retention` | daily 04:00 | Create next 3 days of partitions, drop partitions older than `RETENTION_DAYS` (14) |
@@ -143,7 +147,7 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 | `GET /health` | DB status, seconds since last successful poll |
 
 ## Configuration (env, pydantic-settings)
-`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
+`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `STOP_EVENTS_INTERVAL_SECONDS=300`, `STOP_EVENTS_ACTIVE_WINDOW_MINUTES=15`, `STOP_EVENTS_HISTORY_HOURS=4`, `STOP_EVENT_MAX_GAP_SECONDS=600`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
 
 ## Testing
 - Unit: pure functions in `app/metrics` (matching, delay, headway, aggregation), including post-midnight trips and cancelled trips.

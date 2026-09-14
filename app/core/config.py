@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     severity_severe_seconds: int = 1200
     live_vehicle_max_age_seconds: int = 300
     feed_stale_after_seconds: int = 180
+    stop_events_interval_seconds: int = 300
+    stop_events_active_window_minutes: int = 15
+    stop_events_history_hours: int = 4
+    stop_event_max_gap_seconds: int = 600
     frequent_headway_seconds: int = 900
     retention_days: int = 14
     ranking_min_samples: int = 200

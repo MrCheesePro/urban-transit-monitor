@@ -84,7 +84,7 @@ def next_stop_prediction(
 # Candidate service dates for a prediction whose trip did not say which service day it belongs to:
 # the local calendar date of the predicted time, and the day before (a trip scheduled at 25:10:00
 # is predicted on the next calendar date but belongs to the previous service day).
-def _candidate_service_dates(moment: dt.datetime, timezone: ZoneInfo) -> list[dt.date]:
+def candidate_service_dates(moment: dt.datetime, timezone: ZoneInfo) -> list[dt.date]:
     local_date = moment.astimezone(timezone).date()
     return [local_date, local_date - dt.timedelta(days=1)]
 
@@ -114,7 +114,7 @@ def estimate_delay(
         predicted, schedule_secs = stop.departure_time, departure_secs
     else:
         return None
-    dates = [service_date] if service_date else _candidate_service_dates(predicted, timezone)
+    dates = [service_date] if service_date else candidate_service_dates(predicted, timezone)
     delays = [
         round((predicted - scheduled_datetime(date, schedule_secs, timezone)).total_seconds())
         for date in dates

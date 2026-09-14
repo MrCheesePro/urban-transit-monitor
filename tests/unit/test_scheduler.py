@@ -15,3 +15,10 @@ def test_poll_realtime_job_registered() -> None:
     job = build_scheduler().get_job("poll_realtime")
     assert job is not None
     assert "0:01:00" in str(job.trigger)
+
+
+# The worker derives stop events on a fixed interval (default every 5 minutes).
+def test_derive_stop_events_job_registered() -> None:
+    job = build_scheduler().get_job("derive_stop_events")
+    assert job is not None
+    assert "0:05:00" in str(job.trigger)

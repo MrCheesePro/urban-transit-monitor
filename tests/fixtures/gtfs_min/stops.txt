@@ -2,3 +2,5 @@ stop_id,stop_name,stop_lat,stop_lon,location_type,parent_station
 place-alfcl,Alewife,42.395428,-71.142483,1,
 70061,Alewife Red Line platform,42.396158,-71.139971,0,place-alfcl
 1,Washington St opp Ruggles St,42.330957,-71.082754,0,
+70063,Davis Red Line platform,42.39674,-71.121815,0,
+70065,Porter Red Line platform,42.3884,-71.119149,0,

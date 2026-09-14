@@ -87,7 +87,9 @@ def engine() -> Iterator[Engine]:
 @pytest.fixture
 def clean_realtime(engine: Engine) -> None:
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE vehicle_positions, vehicle_latest, realtime_feed_state"))
+        conn.execute(
+            text("TRUNCATE vehicle_positions, vehicle_latest, realtime_feed_state, stop_events")
+        )
 
 
 # Load the fixture feed into the test database fresh for a test (force=True replaces earlier data).

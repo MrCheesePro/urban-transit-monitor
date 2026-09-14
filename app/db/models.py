@@ -158,6 +158,8 @@ class VehiclePosition(_VehicleSnapshotColumns, Base):
     __tablename__ = "vehicle_positions"
     __table_args__ = (
         Index("ix_vehicle_positions_route_id_feed_timestamp", "route_id", "feed_timestamp"),
+        Index("ix_vehicle_positions_trip_id_feed_timestamp", "trip_id", "feed_timestamp"),
+        Index("ix_vehicle_positions_feed_timestamp", "feed_timestamp"),
         {"postgresql_partition_by": "RANGE (feed_timestamp)"},
     )
 
@@ -173,6 +175,43 @@ class VehicleLatest(_VehicleSnapshotColumns, Base):
     vehicle_id: Mapped[str] = mapped_column(primary_key=True)
     route_id: Mapped[str | None] = mapped_column(index=True)
     feed_timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# Derived tables. Built from the realtime history by the derive_stop_events job.
+
+
+# One vehicle's estimated arrival at one stop of one trip on one service day, compared with the
+# timetable (delay_seconds, positive = late) and with the vehicle before it at the same stop
+# (headway_seconds, and the planned gap scheduled_headway_seconds). See app/metrics/arrivals.py
+# for how arrival times are estimated.
+class StopEvent(Base):
+    __tablename__ = "stop_events"
+    __table_args__ = (
+        Index(
+            "ix_stop_events_route_direction_stop_arrival",
+            "route_id",
+            "direction_id",
+            "stop_id",
+            "observed_arrival",
+        ),
+        Index("ix_stop_events_observed_arrival", "observed_arrival"),
+    )
+
+    trip_id: Mapped[str] = mapped_column(primary_key=True)
+    service_date: Mapped[dt.date] = mapped_column(Date, primary_key=True)
+    stop_sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    route_id: Mapped[str]
+    direction_id: Mapped[int | None] = mapped_column(SmallInteger)
+    stop_id: Mapped[str]
+    vehicle_id: Mapped[str | None]
+    observed_arrival: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    scheduled_arrival: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    delay_seconds: Mapped[int | None] = mapped_column(Integer)
+    headway_seconds: Mapped[int | None] = mapped_column(Integer)
+    scheduled_headway_seconds: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

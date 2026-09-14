@@ -7,6 +7,7 @@ from sqlalchemy import Engine, text
 from app.core.config import get_settings
 from app.db.session import get_engine
 from app.gtfs import realtime, realtime_ingest, static_loader
+from app.pipeline import stop_events
 
 logger = logging.getLogger(__name__)
 
@@ -92,4 +93,16 @@ def poll_realtime_job() -> JobStatus:
 
     return run_job(
         engine, "poll_realtime", lambda: realtime_ingest.poll_once(engine, settings, fetch).vehicles
+    )
+
+
+# Scheduled job (every STOP_EVENTS_INTERVAL_SECONDS): turn recent vehicle positions into stop
+# arrivals with delay and headway. Records the number of stop events written.
+def derive_stop_events_job() -> JobStatus:
+    engine = get_engine()
+    settings = get_settings()
+    return run_job(
+        engine,
+        "derive_stop_events",
+        lambda: stop_events.derive_stop_events(engine, settings).events,
     )

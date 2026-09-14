@@ -11,9 +11,9 @@ pytestmark = pytest.mark.integration
 
 EXPECTED_COUNTS = {
     "routes": 2,
-    "trips": 3,
-    "stops": 3,
-    "stop_times": 5,
+    "trips": 5,
+    "stops": 5,
+    "stop_times": 11,
     "calendar": 1,
     "calendar_dates": 1,
 }

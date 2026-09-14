@@ -44,6 +44,17 @@ def build_scheduler() -> BlockingScheduler:
         misfire_grace_time=settings.poll_interval_seconds,
     )
 
+    # Stop arrivals and headways: every STOP_EVENTS_INTERVAL_SECONDS. The first run waits one
+    # interval so a fresh worker has collected a few polls before deriving anything.
+    scheduler.add_job(
+        jobs.derive_stop_events_job,
+        IntervalTrigger(seconds=settings.stop_events_interval_seconds, timezone=timezone),
+        id="derive_stop_events",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=settings.stop_events_interval_seconds,
+    )
+
     # Registered in later milestones: aggregate_hourly (M4), retention (M5).
     return scheduler
 

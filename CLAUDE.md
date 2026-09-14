@@ -2,7 +2,7 @@
 
 Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip updates), matches them against the static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Current milestone:** M3 (trip matching, `stop_events`, observed arrivals, headway). M0, M1, and M2 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
+**Current milestone:** M4 (hourly aggregation, `GET /api/v1/routes/{id}/historical`, `GET /api/v1/performance/rankings`). M0 through M3 are done. Milestones M0–M5 are listed in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
@@ -28,10 +28,11 @@ uv run ruff check . && uv run mypy app           # lint + types
 ## Layout
 ```
 app/core/config.py     settings from env (feed URLs, on-time window, retention days)
-app/db/                models.py, session.py
-app/gtfs/              static_loader.py (GTFS zip), realtime.py (fetch + protobuf decode)
-app/metrics/           matching.py, delay.py, headway.py, aggregate.py (pure functions)
-app/worker/            scheduler.py, jobs.py (poll_realtime, aggregate_hourly, load_static_gtfs, retention)
+app/db/                models.py, session.py, partitions.py (daily vehicle_positions partitions)
+app/gtfs/              static_loader.py (GTFS zip), realtime.py (fetch + protobuf decode), realtime_ingest.py (poll_once)
+app/metrics/           delay.py, arrivals.py, headway.py (pure functions; aggregate.py comes in M4)
+app/pipeline/          stop_events.py (database orchestration for derived tables)
+app/worker/            scheduler.py, jobs.py (load_static_gtfs, poll_realtime, derive_stop_events; aggregate_hourly and retention later)
 app/api/               main.py, routers/, schemas/
 alembic/               migrations
 tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
@@ -46,7 +47,8 @@ tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
 - Frequent routes (scheduled headway ≤ 15 min) are also judged on headway adherence and excess wait time.
 - CANCELED trips are excluded from delay averages and counted separately.
 - Severity (config-driven): `on_time` inside the window, `early` before it, `minor` late up to 10 min, `major` up to 20 min, `severe` beyond, `unknown` with no estimate. Route severity uses the median delay of vehicles with an estimate.
-- MBTA realtime feeds have no `delay` field and often omit the vehicle's `start_date`. Many subway trips are `ADDED` with no timetable, so their delay is `None` (never guess).
+- MBTA realtime feeds have no `delay` field and often omit the vehicle's `start_date`. Many subway trips are `ADDED` with no timetable, so their delay is `None` (never guess), and they produce no `stop_events`.
+- Feeds never say when a vehicle reached a stop. `app/metrics/arrivals.py` estimates it between polls: the midpoint when a vehicle is caught stopped at the stop, schedule-weighted interpolation when it passed the stop between polls. The first stop of a trip never gets an arrival. Headway compares consecutive arrivals at the same route, direction, and stop.
 - Rankings weight by `sample_count` and skip routes below `min_samples`.
 
 ## Conventions
