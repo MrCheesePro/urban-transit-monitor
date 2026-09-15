@@ -1,0 +1,39 @@
+# Production overrides for a public server (for example a VPS behind nginx or Caddy).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences from local development:
+# - The database and API are not published on any host port. Only the website is, and only on
+#   127.0.0.1:8080, so it is reachable from the server's own reverse proxy but not from the internet.
+# - The database password comes from POSTGRES_PASSWORD in .env instead of the development default.
+#   It is applied when the database volume is first created, so set it before the first start.
+# - Every service restarts automatically after a crash or a server reboot.
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg://transit:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/transit
+  LA_METRO_API_KEY: ${LA_METRO_API_KEY:-}
+  LA_METRO_API_KEY_HEADER: ${LA_METRO_API_KEY_HEADER:-Authorization}
+
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports: !reset []
+    restart: unless-stopped
+
+  migrate:
+    environment: *app-env
+
+  api:
+    environment: *app-env
+    ports: !reset []
+    restart: unless-stopped
+
+  worker:
+    environment: *app-env
+    restart: unless-stopped
+
+  web:
+    ports: !override
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped
