@@ -5,11 +5,12 @@ import httpx
 import pytest
 from sqlalchemy import Engine, text
 
-from app.core.config import get_settings
+from app.core.agencies import Agency
 from app.db.partitions import daily_partition
 from app.gtfs.realtime_ingest import Fetcher, poll_once
 from app.gtfs.static_loader import LoadResult
 from app.metrics.delay import scheduled_datetime
+from tests.agencies import agency
 from tests.builders import trip_update_feed, vehicle_feed
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("loaded_feed", "clean_realtime")]
@@ -26,11 +27,11 @@ def _posix(moment: dt.datetime) -> int:
     return int(moment.timestamp())
 
 
-# Fake feeds for one snapshot at `header`, using trips from the tests/fixtures/gtfs_min timetable:
-# R-1 runs red-1 and is 180 s late; R-2 is an ADDED shuttle with no timetable (no delay possible);
-# B-1 runs bus-1 with no start_date, 30 s late (its service date must be inferred).
-def _feeds(header: dt.datetime) -> dict[str, bytes]:
-    settings = get_settings()
+# Fake feeds for one snapshot at `header`, served at the agency's feed URLs, using trips from the
+# tests/fixtures/gtfs_min timetable: R-1 runs red-1 and is 180 s late; R-2 is an ADDED shuttle with
+# no timetable (no delay possible); B-1 runs bus-1 with no start_date, 30 s late (its service date
+# must be inferred).
+def _feeds(target: Agency, header: dt.datetime) -> dict[str, bytes]:
     vehicles = [
         {
             "id": "R-1",
@@ -78,27 +79,36 @@ def _feeds(header: dt.datetime) -> dict[str, bytes]:
         {"trip_id": "bus-1", "stops": [{"stop_sequence": 2, "arrival": _posix(BUS_1_STOP_2) + 30}]},
     ]
     return {
-        settings.mbta_vehicle_positions_url: vehicle_feed(_posix(header), vehicles),
-        settings.mbta_trip_updates_url: trip_update_feed(_posix(header), trips),
+        target.vehicle_positions_url: vehicle_feed(_posix(header), vehicles),
+        target.trip_updates_url: trip_update_feed(_posix(header), trips),
     }
 
 
-# Latest delay per vehicle from vehicle_latest.
-def _latest_delays(engine: Engine) -> dict[str, int | None]:
+# Latest delay per vehicle of one agency from vehicle_latest.
+def _latest_delays(engine: Engine, slug: str = "mbta") -> dict[str, int | None]:
     with engine.connect() as conn:
-        rows = conn.execute(text("SELECT vehicle_id, delay_seconds FROM vehicle_latest"))
+        rows = conn.execute(
+            text("SELECT vehicle_id, delay_seconds FROM vehicle_latest WHERE agency = :agency"),
+            {"agency": slug},
+        )
         return {row.vehicle_id: row.delay_seconds for row in rows}
 
 
-# Number of rows in the vehicle_positions history.
-def _position_count(engine: Engine) -> int:
+# Number of rows in the vehicle_positions history for one agency.
+def _position_count(engine: Engine, slug: str = "mbta") -> int:
     with engine.connect() as conn:
-        return int(conn.execute(text("SELECT count(*) FROM vehicle_positions")).scalar_one())
+        return int(
+            conn.execute(
+                text("SELECT count(*) FROM vehicle_positions WHERE agency = :agency"),
+                {"agency": slug},
+            ).scalar_one()
+        )
 
 
 # One poll stores every vehicle, creates the day's partition, and estimates delays where possible.
 def test_poll_stores_vehicles_and_delays(engine: Engine, loaded_feed: LoadResult) -> None:
-    result = poll_once(engine, get_settings(), _feeds(HEADER).__getitem__)
+    mbta = agency("mbta")
+    result = poll_once(engine, mbta, _feeds(mbta, HEADER).__getitem__)
     assert (result.skipped, result.vehicles, result.with_delay) == (False, 3, 2)
     assert _position_count(engine) == 3
     assert _latest_delays(engine) == {"R-1": 180, "R-2": None, "B-1": 30}
@@ -111,50 +121,83 @@ def test_poll_stores_vehicles_and_delays(engine: Engine, loaded_feed: LoadResult
 
 # Polling the same snapshot twice is detected by its header timestamp and skipped.
 def test_unchanged_snapshot_is_skipped(engine: Engine) -> None:
-    fetch = _feeds(HEADER).__getitem__
-    poll_once(engine, get_settings(), fetch)
-    again = poll_once(engine, get_settings(), fetch)
+    mbta = agency("mbta")
+    fetch = _feeds(mbta, HEADER).__getitem__
+    poll_once(engine, mbta, fetch)
+    again = poll_once(engine, mbta, fetch)
     assert again.skipped
     assert _position_count(engine) == 3
 
 
 # A newer snapshot adds history rows and moves vehicle_latest forward.
 def test_newer_snapshot_updates_latest(engine: Engine) -> None:
+    mbta = agency("mbta")
     later = HEADER + dt.timedelta(minutes=1)
-    poll_once(engine, get_settings(), _feeds(HEADER).__getitem__)
-    poll_once(engine, get_settings(), _feeds(later).__getitem__)
+    poll_once(engine, mbta, _feeds(mbta, HEADER).__getitem__)
+    poll_once(engine, mbta, _feeds(mbta, later).__getitem__)
     assert _position_count(engine) == 6
     with engine.connect() as conn:
         latest = conn.execute(
-            text("SELECT feed_timestamp FROM vehicle_latest WHERE vehicle_id = 'R-1'")
+            text(
+                "SELECT feed_timestamp FROM vehicle_latest "
+                "WHERE agency = 'mbta' AND vehicle_id = 'R-1'"
+            )
         ).scalar_one()
     assert latest == later
 
 
 # An older snapshot arriving late never moves vehicle_latest back in time.
 def test_older_snapshot_does_not_overwrite_latest(engine: Engine) -> None:
+    mbta = agency("mbta")
     earlier = HEADER - dt.timedelta(minutes=5)
-    poll_once(engine, get_settings(), _feeds(HEADER).__getitem__)
-    poll_once(engine, get_settings(), _feeds(earlier).__getitem__)
+    poll_once(engine, mbta, _feeds(mbta, HEADER).__getitem__)
+    poll_once(engine, mbta, _feeds(mbta, earlier).__getitem__)
     with engine.connect() as conn:
         latest = conn.execute(
-            text("SELECT feed_timestamp FROM vehicle_latest WHERE vehicle_id = 'R-1'")
+            text(
+                "SELECT feed_timestamp FROM vehicle_latest "
+                "WHERE agency = 'mbta' AND vehicle_id = 'R-1'"
+            )
         ).scalar_one()
     assert latest == HEADER
 
 
 # If the trip updates download fails, vehicles are still stored, just without delays.
 def test_trip_updates_failure_still_stores_vehicles(engine: Engine) -> None:
-    settings = get_settings()
-    feeds = _feeds(HEADER)
+    mbta = agency("mbta")
+    feeds = _feeds(mbta, HEADER)
 
     # Serve the vehicle feed but fail the trip updates request like a network error would.
     def fetch(url: str) -> bytes:
-        if url == settings.mbta_trip_updates_url:
+        if url == mbta.trip_updates_url:
             raise httpx.ConnectError("connection refused")
         return feeds[url]
 
     fetcher: Fetcher = fetch
-    result = poll_once(engine, settings, fetcher)
+    result = poll_once(engine, mbta, fetcher)
     assert (result.vehicles, result.with_delay) == (3, 0)
     assert set(_latest_delays(engine).values()) == {None}
+
+
+# Two agencies can report vehicles with the same ids at the same moment: each agency's vehicles,
+# delays, and feed state are stored separately, so the second agency's identical snapshot is not
+# skipped as "unchanged". LA Metro reads the same timetable times in Los Angeles time, three hours
+# later than Boston, so its vehicles come out 10,800 s earlier than the MBTA's.
+def test_agencies_are_stored_separately(engine: Engine, loaded_la_rail_feed: LoadResult) -> None:
+    mbta, la_rail = agency("mbta"), agency("lametro-rail")
+    poll_once(engine, mbta, _feeds(mbta, HEADER).__getitem__)
+    la_result = poll_once(engine, la_rail, _feeds(la_rail, HEADER).__getitem__)
+    assert not la_result.skipped
+    assert _position_count(engine, "mbta") == 3
+    assert _position_count(engine, "lametro-rail") == 3
+    assert _latest_delays(engine, "mbta") == {"R-1": 180, "R-2": None, "B-1": 30}
+    assert _latest_delays(engine, "lametro-rail") == {
+        "R-1": 180 - 10800,
+        "R-2": None,
+        "B-1": 30 - 10800,
+    }
+    with engine.connect() as conn:
+        states = conn.execute(
+            text("SELECT agency FROM realtime_feed_state WHERE feed = 'vehicle_positions'")
+        ).scalars()
+        assert set(states) == {"mbta", "lametro-rail"}

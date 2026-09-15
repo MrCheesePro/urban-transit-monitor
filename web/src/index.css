@@ -4,8 +4,8 @@
   Linecheck design tokens.
 
   Palette: a pale green-gray like station wall tile for the page, near-white panels, and ink text.
-  Severity has its own scale so it never collides with MBTA line colors (Red, Orange, Green, Blue
-  lines), which only appear on route badges and come from the MBTA timetable itself.
+  Severity has its own scale so it never collides with line colors (MBTA Red, Orange, Green, Blue;
+  LA Metro A to K lines), which only appear on route badges and come from each agency's timetable.
   Solid colors only: no gradients anywhere.
 */
 :root {

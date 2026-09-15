@@ -6,6 +6,7 @@ import {
   ErrorPanel,
   LoadingPanel,
   PageHeader,
+  RealtimeNotConnected,
   RouteBadge,
 } from '@/components/common'
 import { SegmentedControl } from '@/components/SegmentedControl'
@@ -21,15 +22,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import type { RankingMetric } from '@/lib/api'
 import {
   MODE_ORDER,
-  bostonDateTime,
   formatCount,
   formatCv,
   formatDuration,
   formatPercent,
+  localDateTime,
   modeName,
   routeName,
 } from '@/lib/format'
-import { useRankings, useRouteLookup } from '@/lib/queries'
+import { routeKey, useRankings, useRouteLookup } from '@/lib/queries'
+import { linePath, useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 import { cn } from '@/lib/utils'
 
@@ -56,18 +58,19 @@ function pick<T extends string>(value: string | null, allowed: readonly T[], fal
   return value !== null && (allowed as readonly string[]).includes(value) ? (value as T) : fallback
 }
 
-// The rankings page: lines ordered from most to least reliable over a period, by on-time share,
+// A city's rankings page: lines ordered from most to least reliable over a period, by on-time share,
 // smallest delay, or most even spacing, optionally for one mode. The chosen filters are kept in the
 // address bar so a particular view can be shared as a link.
 export function RankingsPage() {
-  useDocumentTitle('Rankings')
+  const region = useRegion()
+  useDocumentTitle(`${region.name} rankings`)
   const [params, setParams] = useSearchParams()
   const metric = pick(params.get('metric'), METRICS, 'on_time')
   const days = pick(params.get('days'), PERIODS, '30')
   const mode = pick(params.get('mode'), MODES, 'all')
   const minimum = pick(params.get('min'), MINIMUMS, '200')
-  const lookup = useRouteLookup()
-  const rankings = useRankings({
+  const lookup = useRouteLookup(region.slug)
+  const rankings = useRankings(region.slug, {
     metric,
     days: Number(days),
     minSamples: Number(minimum),
@@ -87,9 +90,16 @@ export function RankingsPage() {
   return (
     <Container>
       <PageHeader
+        eyebrow={region.name}
         title="Rankings"
-        description="Lines ordered from most to least reliable, using complete hours only and both directions combined."
+        description={`${region.operator} lines ordered from most to least reliable, using complete hours only and both directions combined.`}
       />
+
+      {!region.realtime_configured ? (
+        <div className="mt-6">
+          <RealtimeNotConnected operator={region.operator} />
+        </div>
+      ) : null}
 
       <div className="mt-6 flex flex-wrap items-end gap-4">
         <div>
@@ -175,13 +185,14 @@ export function RankingsPage() {
                 </TableHeader>
                 <TableBody>
                   {rankings.data.routes.map((ranked) => {
-                    const route = lookup.get(ranked.route_id)
+                    const key = routeKey(ranked.agency, ranked.route_id)
+                    const route = lookup.get(key)
                     return (
-                      <TableRow key={ranked.route_id}>
+                      <TableRow key={key}>
                         <TableCell className="text-right font-mono">{ranked.rank}</TableCell>
                         <TableCell>
                           <Link
-                            to={`/lines/${encodeURIComponent(ranked.route_id)}/history`}
+                            to={`${linePath(region.slug, ranked.agency, ranked.route_id)}/history`}
                             className="flex items-center gap-3 hover:underline hover:underline-offset-4"
                           >
                             <RouteBadge route={route} routeId={ranked.route_id} />
@@ -208,8 +219,8 @@ export function RankingsPage() {
             </div>
             <div className="mt-3 space-y-1 text-sm text-muted-foreground">
               <p>
-                Complete hours from {bostonDateTime(rankings.data.period_start)} to{' '}
-                {bostonDateTime(rankings.data.period_end)}, Boston time.
+                Complete hours from {localDateTime(rankings.data.period_start, region.timezone)} to{' '}
+                {localDateTime(rankings.data.period_end, region.timezone)}, {region.name} time.
               </p>
               {rankings.data.excluded_routes > 0 ? (
                 <p>

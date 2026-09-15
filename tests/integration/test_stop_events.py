@@ -7,8 +7,10 @@ from sqlalchemy import Engine, text
 
 from app.core.config import get_settings
 from app.gtfs.realtime_ingest import poll_once
+from app.gtfs.static_loader import LoadResult
 from app.metrics.delay import scheduled_datetime
 from app.pipeline.stop_events import derive_stop_events
+from tests.agencies import agency
 from tests.builders import trip_update_feed, vehicle_feed
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("loaded_feed", "clean_realtime")]
@@ -22,24 +24,26 @@ def at(hours: int, minutes: int, seconds: int = 0) -> dt.datetime:
     return scheduled_datetime(SERVICE_DATE, hours * 3600 + minutes * 60 + seconds, NY)
 
 
-# Store one vehicle snapshot through the real poller, as if MBTA had published it at `moment`.
-def observe(engine: Engine, moment: dt.datetime, vehicle: dict[str, Any]) -> None:
-    settings = get_settings()
+# Store one vehicle snapshot through the real poller, as if the agency had published it at `moment`.
+def observe(
+    engine: Engine, moment: dt.datetime, vehicle: dict[str, Any], slug: str = "mbta"
+) -> None:
+    target = agency(slug)
     stamp = int(moment.timestamp())
     feeds = {
-        settings.mbta_vehicle_positions_url: vehicle_feed(stamp, [{**vehicle, "timestamp": stamp}]),
-        settings.mbta_trip_updates_url: trip_update_feed(stamp, []),
+        target.vehicle_positions_url: vehicle_feed(stamp, [{**vehicle, "timestamp": stamp}]),
+        target.trip_updates_url: trip_update_feed(stamp, []),
     }
-    poll_once(engine, settings, feeds.__getitem__)
+    poll_once(engine, target, feeds.__getitem__)
 
 
 # Replay Red Line trip red-3 from tests/fixtures/gtfs_min: it reports its start_date and is
 # scheduled at 08:00, 08:02, 08:05.
-def replay_red_3(engine: Engine) -> None:
+def replay_red_3(engine: Engine, slug: str = "mbta") -> None:
     red_3 = {"id": "V3", "trip_id": "red-3", "route_id": "Red", "start_date": "20260914"}
-    observe(engine, at(8, 1), {**red_3, "stop_sequence": 2, "status": "IN_TRANSIT_TO"})
-    observe(engine, at(8, 3), {**red_3, "stop_sequence": 3, "status": "IN_TRANSIT_TO"})
-    observe(engine, at(8, 6), {**red_3, "stop_sequence": 3, "status": "STOPPED_AT"})
+    observe(engine, at(8, 1), {**red_3, "stop_sequence": 2, "status": "IN_TRANSIT_TO"}, slug)
+    observe(engine, at(8, 3), {**red_3, "stop_sequence": 3, "status": "IN_TRANSIT_TO"}, slug)
+    observe(engine, at(8, 6), {**red_3, "stop_sequence": 3, "status": "STOPPED_AT"}, slug)
 
 
 # Replay trip red-4, ten minutes behind red-3: it has no start_date, so its service day must be
@@ -58,14 +62,20 @@ def replay_two_trips(engine: Engine) -> None:
     replay_red_4(engine)
 
 
-# All stop events as (trip, stop_sequence) -> (arrival, delay, headway, scheduled headway).
-def stop_events(engine: Engine) -> dict[tuple[str, int], tuple[Any, ...]]:
+# Derive stop events for one agency at `now`.
+def derive(engine: Engine, now: dt.datetime, slug: str = "mbta") -> Any:
+    return derive_stop_events(engine, get_settings(), agency(slug), now=now)
+
+
+# One agency's stop events as (trip, stop_sequence) -> (arrival, delay, headway, scheduled headway).
+def stop_events(engine: Engine, slug: str = "mbta") -> dict[tuple[str, int], tuple[Any, ...]]:
     with engine.connect() as conn:
         rows = conn.execute(
             text(
                 "SELECT trip_id, stop_sequence, observed_arrival, delay_seconds, headway_seconds, "
-                "scheduled_headway_seconds FROM stop_events"
-            )
+                "scheduled_headway_seconds FROM stop_events WHERE agency = :agency"
+            ),
+            {"agency": slug},
         )
         return {(row[0], row[1]): tuple(row[2:]) for row in rows}
 
@@ -78,7 +88,7 @@ def stop_events(engine: Engine) -> dict[tuple[str, int], tuple[Any, ...]]:
 # - headways at stop 2: 612 s (planned 600); at stop 3: 810 s (planned 600).
 def test_derives_arrivals_delays_and_headways(engine: Engine) -> None:
     replay_two_trips(engine)
-    result = derive_stop_events(engine, get_settings(), now=at(8, 20))
+    result = derive(engine, at(8, 20))
     assert (result.trips, result.events) == (2, 4)
     assert stop_events(engine) == {
         ("red-3", 2): (at(8, 1, 48), -12, None, None),
@@ -91,21 +101,20 @@ def test_derives_arrivals_delays_and_headways(engine: Engine) -> None:
 # Running the job again over the same data changes nothing.
 def test_rerun_is_idempotent(engine: Engine) -> None:
     replay_two_trips(engine)
-    derive_stop_events(engine, get_settings(), now=at(8, 20))
+    derive(engine, at(8, 20))
     first = stop_events(engine)
-    again = derive_stop_events(engine, get_settings(), now=at(8, 20))
+    again = derive(engine, at(8, 20))
     assert again.headways_updated == 0
     assert stop_events(engine) == first
 
 
 # A trip whose events are derived in a later run still gets its headway against the earlier trip.
 def test_headway_links_across_runs(engine: Engine) -> None:
-    settings = get_settings()
     replay_red_3(engine)
-    derive_stop_events(engine, settings, now=at(8, 7))  # red-4 has not been seen yet
+    derive(engine, at(8, 7))  # red-4 has not been seen yet
     assert set(stop_events(engine)) == {("red-3", 2), ("red-3", 3)}
     replay_red_4(engine)
-    derive_stop_events(engine, settings, now=at(8, 20))
+    derive(engine, at(8, 20))
     assert stop_events(engine)[("red-4", 3)][2:] == (810, 600)
 
 
@@ -114,11 +123,21 @@ def test_trips_without_timetable_are_ignored(engine: Engine) -> None:
     shuttle = {"id": "S1", "trip_id": "ADDED-1", "route_id": "Red"}
     observe(engine, at(8, 1), {**shuttle, "stop_sequence": 1})
     observe(engine, at(8, 2), {**shuttle, "stop_sequence": 2, "status": "STOPPED_AT"})
-    result = derive_stop_events(engine, get_settings(), now=at(8, 5))
+    result = derive(engine, at(8, 5))
     assert result.events == 0
     assert stop_events(engine) == {}
 
 
 # With no recent positions there is nothing to do.
 def test_nothing_active(engine: Engine) -> None:
-    assert derive_stop_events(engine, get_settings(), now=at(8, 0)).events == 0
+    assert derive(engine, at(8, 0)).events == 0
+
+
+# Positions of one agency only ever become stop events for that agency: LA Metro Rail vehicles on
+# trip ids that also exist in the MBTA timetable produce no MBTA events.
+def test_agencies_are_derived_separately(engine: Engine, loaded_la_rail_feed: LoadResult) -> None:
+    replay_red_3(engine, slug="lametro-rail")
+    assert derive(engine, at(8, 7), slug="mbta").events == 0
+    assert derive(engine, at(8, 7), slug="lametro-rail").events == 2
+    assert stop_events(engine, "mbta") == {}
+    assert set(stop_events(engine, "lametro-rail")) == {("red-3", 2), ("red-3", 3)}

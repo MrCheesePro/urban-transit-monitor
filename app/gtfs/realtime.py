@@ -62,10 +62,13 @@ class TripPrediction:
     stops: tuple[StopPrediction, ...]
 
 
-# Download one feed and return its raw bytes. Raises on timeouts and HTTP errors; the poller simply
-# tries again on its next run, so there is no retry loop here.
-def fetch_feed_bytes(url: str, timeout_seconds: float) -> bytes:
-    response = httpx.get(url, timeout=timeout_seconds, follow_redirects=True)
+# Download one feed and return its raw bytes, sending any extra headers (such as an API key).
+# Raises on timeouts and HTTP errors; the poller simply tries again on its next run, so there is no
+# retry loop here.
+def fetch_feed_bytes(
+    url: str, timeout_seconds: float, headers: dict[str, str] | None = None
+) -> bytes:
+    response = httpx.get(url, timeout=timeout_seconds, follow_redirects=True, headers=headers)
     response.raise_for_status()
     return response.content
 

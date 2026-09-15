@@ -53,4 +53,4 @@ def test_iter_rows_error_names_file_and_line(make_gtfs_zip: GtfsZipFactory) -> N
 def test_load_rejects_zip_missing_required_file(make_gtfs_zip: GtfsZipFactory) -> None:
     zip_path = make_gtfs_zip({"stop_times.txt": None})
     with pytest.raises(ValueError, match=r"stop_times\.txt"):
-        load_static_gtfs(cast(Engine, None), zip_path)
+        load_static_gtfs(cast(Engine, None), zip_path, "mbta")

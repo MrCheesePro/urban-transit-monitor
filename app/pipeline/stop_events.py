@@ -8,9 +8,10 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Connection, Engine, Row, Table, bindparam, func, select, text, update
+from sqlalchemy import Connection, Engine, Row, Table, and_, bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
+from app.core.agencies import Agency
 from app.core.config import Settings
 from app.db.models import StopEvent, StopTime, Trip, VehiclePosition
 from app.metrics.arrivals import (
@@ -52,12 +53,16 @@ class TripSchedule:
     stops: list[ScheduledStop] = field(default_factory=list)
 
 
-# Trip ids that have at least one stored position since `since`: the trips that may have reached
-# new stops since the last run.
-def _active_trip_ids(conn: Connection, since: dt.datetime) -> list[str]:
+# Trip ids of one agency that have at least one stored position since `since`: the trips that may
+# have reached new stops since the last run.
+def _active_trip_ids(conn: Connection, agency: str, since: dt.datetime) -> list[str]:
     rows = conn.execute(
         select(VehiclePosition.trip_id)
-        .where(VehiclePosition.feed_timestamp >= since, VehiclePosition.trip_id.is_not(None))
+        .where(
+            VehiclePosition.agency == agency,
+            VehiclePosition.feed_timestamp >= since,
+            VehiclePosition.trip_id.is_not(None),
+        )
         .distinct()
     )
     return [row.trip_id for row in rows]
@@ -65,7 +70,7 @@ def _active_trip_ids(conn: Connection, since: dt.datetime) -> list[str]:
 
 # Load the stored positions of these trips since `since`, grouped by trip and ordered by time.
 def _load_snapshots(
-    conn: Connection, trip_ids: list[str], since: dt.datetime
+    conn: Connection, agency: str, trip_ids: list[str], since: dt.datetime
 ) -> dict[str, list[TripSnapshot]]:
     rows = conn.execute(
         select(
@@ -76,7 +81,11 @@ def _load_snapshots(
             VehiclePosition.current_status,
             VehiclePosition.service_date,
         )
-        .where(VehiclePosition.trip_id.in_(trip_ids), VehiclePosition.feed_timestamp >= since)
+        .where(
+            VehiclePosition.agency == agency,
+            VehiclePosition.trip_id.in_(trip_ids),
+            VehiclePosition.feed_timestamp >= since,
+        )
         .order_by(VehiclePosition.trip_id, VehiclePosition.feed_timestamp)
     )
     snapshots: dict[str, list[TripSnapshot]] = defaultdict(list)
@@ -93,9 +102,9 @@ def _load_snapshots(
     return snapshots
 
 
-# Load each trip's route, direction, and stops (ordered by stop_sequence) from the timetable.
-# Trips that are not in the timetable, such as ADDED trips, are simply absent from the result.
-def _load_schedules(conn: Connection, trip_ids: list[str]) -> dict[str, TripSchedule]:
+# Load each trip's route, direction, and stops (ordered by stop_sequence) from the agency's
+# timetable. Trips that are not in the timetable, such as ADDED trips, are simply absent.
+def _load_schedules(conn: Connection, agency: str, trip_ids: list[str]) -> dict[str, TripSchedule]:
     rows = conn.execute(
         select(
             Trip.trip_id,
@@ -106,8 +115,8 @@ def _load_schedules(conn: Connection, trip_ids: list[str]) -> dict[str, TripSche
             StopTime.arrival_secs,
             StopTime.departure_secs,
         )
-        .join(StopTime, StopTime.trip_id == Trip.trip_id)
-        .where(Trip.trip_id.in_(trip_ids))
+        .join(StopTime, and_(StopTime.agency == Trip.agency, StopTime.trip_id == Trip.trip_id))
+        .where(Trip.agency == agency, Trip.trip_id.in_(trip_ids))
         .order_by(Trip.trip_id, StopTime.stop_sequence)
     )
     schedules: dict[str, TripSchedule] = {}
@@ -126,14 +135,19 @@ def _load_schedules(conn: Connection, trip_ids: list[str]) -> dict[str, TripSche
     return schedules
 
 
-# Insert new stop events, or refresh existing ones (same trip, service date, and stop).
+# Insert new stop events, or refresh existing ones (same agency, trip, service date, and stop).
 def _upsert_events(conn: Connection, rows: list[dict[str, Any]]) -> None:
     statement = insert(StopEvent)
     updates: dict[str, Any] = {name: statement.excluded[name] for name in _EVENT_UPDATE_COLUMNS}
     updates["updated_at"] = func.now()
     conn.execute(
         statement.on_conflict_do_update(
-            index_elements=[StopEvent.trip_id, StopEvent.service_date, StopEvent.stop_sequence],
+            index_elements=[
+                StopEvent.agency,
+                StopEvent.trip_id,
+                StopEvent.service_date,
+                StopEvent.stop_sequence,
+            ],
             set_=updates,
         ),
         rows,
@@ -154,22 +168,23 @@ _GROUP_EVENTS_SQL = text(
       ON events.route_id = wanted.route_id
      AND events.direction_id = wanted.direction_id
      AND events.stop_id = wanted.stop_id
-    WHERE events.observed_arrival >= :since
+    WHERE events.agency = :agency AND events.observed_arrival >= :since
     """
 )
 
 
-# Load the stop events at these (route, direction, stop) groups that arrived at or after `since`.
-# The groups are sent as three parallel arrays and joined with unnest. A literal
+# Load one agency's stop events at these (route, direction, stop) groups that arrived at or after
+# `since`. The groups are sent as three parallel arrays and joined with unnest. A literal
 # "(route, direction, stop) IN (...)" list does not work here: at full daytime service it has
 # thousands of entries and Postgres fails with "stack depth limit exceeded".
 def load_group_events(
-    conn: Connection, groups: set[tuple[str, int, str]], since: dt.datetime
+    conn: Connection, agency: str, groups: set[tuple[str, int, str]], since: dt.datetime
 ) -> Sequence[Row[Any]]:
     ordered = sorted(groups)
     return conn.execute(
         _GROUP_EVENTS_SQL,
         {
+            "agency": agency,
             "route_ids": [group[0] for group in ordered],
             "direction_ids": [group[1] for group in ordered],
             "stop_ids": [group[2] for group in ordered],
@@ -182,7 +197,7 @@ def load_group_events(
 # the earliest new arrival is loaded too, so that arrival can find the vehicle ahead of it, but only
 # rows at or after that arrival are updated (earlier headways cannot change), and only if they
 # changed. Returns how many rows were updated.
-def _recompute_headways(conn: Connection, rows: list[dict[str, Any]]) -> int:
+def _recompute_headways(conn: Connection, agency: str, rows: list[dict[str, Any]]) -> int:
     groups = {
         (row["route_id"], row["direction_id"], row["stop_id"])
         for row in rows
@@ -192,7 +207,7 @@ def _recompute_headways(conn: Connection, rows: list[dict[str, Any]]) -> int:
         return 0
     earliest = min(row["observed_arrival"] for row in rows)
     history_start = earliest - dt.timedelta(seconds=MAX_HEADWAY_SECONDS)
-    existing = load_group_events(conn, groups, history_start)
+    existing = load_group_events(conn, agency, groups, history_start)
 
     headways = compute_headways(
         StopVisit(
@@ -225,6 +240,7 @@ def _recompute_headways(conn: Connection, rows: list[dict[str, Any]]) -> int:
         conn.execute(
             update(table)
             .where(
+                table.c.agency == agency,
                 table.c.trip_id == bindparam("key_trip_id"),
                 table.c.service_date == bindparam("key_service_date"),
                 table.c.stop_sequence == bindparam("key_stop_sequence"),
@@ -238,27 +254,27 @@ def _recompute_headways(conn: Connection, rows: list[dict[str, Any]]) -> int:
     return len(changes)
 
 
-# Run one derivation pass:
-# 1. find trips with positions in the last STOP_EVENTS_ACTIVE_WINDOW_MINUTES;
+# Run one derivation pass for one agency, in that agency's timezone:
+# 1. find its trips with positions in the last STOP_EVENTS_ACTIVE_WINDOW_MINUTES;
 # 2. load their positions from the last STOP_EVENTS_HISTORY_HOURS and their timetable;
 # 3. estimate arrivals (app/metrics/arrivals.py) and upsert them into stop_events;
 # 4. recompute headways for the affected stops (app/metrics/headway.py).
 # Safe to re-run: the same positions always produce the same rows. Trips without a timetable
 # (ADDED trips) produce no events. `now` can be passed in by tests.
 def derive_stop_events(
-    engine: Engine, settings: Settings, now: dt.datetime | None = None
+    engine: Engine, settings: Settings, agency: Agency, now: dt.datetime | None = None
 ) -> DeriveResult:
     now = now or dt.datetime.now(dt.UTC)
-    timezone = ZoneInfo(settings.timezone)
+    timezone = ZoneInfo(agency.timezone)
     active_since = now - dt.timedelta(minutes=settings.stop_events_active_window_minutes)
     history_since = now - dt.timedelta(hours=settings.stop_events_history_hours)
 
     with engine.begin() as conn:
-        trip_ids = _active_trip_ids(conn, active_since)
+        trip_ids = _active_trip_ids(conn, agency.slug, active_since)
         if not trip_ids:
             return DeriveResult(trips=0, events=0, headways_updated=0)
-        snapshots = _load_snapshots(conn, trip_ids, history_since)
-        schedules = _load_schedules(conn, trip_ids)
+        snapshots = _load_snapshots(conn, agency.slug, trip_ids, history_since)
+        schedules = _load_schedules(conn, agency.slug, trip_ids)
 
         rows: list[dict[str, Any]] = []
         matched_trips = 0
@@ -279,6 +295,7 @@ def derive_stop_events(
             )
             rows.extend(
                 {
+                    "agency": agency.slug,
                     "trip_id": trip_id,
                     "service_date": service_date,
                     "stop_sequence": arrival.stop_sequence,
@@ -296,10 +313,11 @@ def derive_stop_events(
         headways_updated = 0
         if rows:
             _upsert_events(conn, rows)
-            headways_updated = _recompute_headways(conn, rows)
+            headways_updated = _recompute_headways(conn, agency.slug, rows)
 
     logger.info(
-        "derived %d stop events from %d trips (%d headways updated)",
+        "%s: derived %d stop events from %d trips (%d headways updated)",
+        agency.slug,
         len(rows),
         matched_trips,
         headways_updated,

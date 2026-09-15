@@ -6,7 +6,16 @@ import { cn } from '@/lib/utils'
 // colored by the chosen metric for that day and hour across the selected period. It is a real table,
 // so screen readers announce the day and hour for each cell; every cell also has a text description
 // on hover. Cells with no observations stay blank. On narrow screens the grid scrolls sideways.
-export function WeeklyGrid({ cells, metric }: { cells: HistoricalCell[]; metric: GridMetric }) {
+// `cityName` names whose local time the days and hours are in, for example "Los Angeles".
+export function WeeklyGrid({
+  cells,
+  metric,
+  cityName,
+}: {
+  cells: HistoricalCell[]
+  metric: GridMetric
+  cityName: string
+}) {
   const byPosition = new Map(cells.map((cell) => [`${cell.day_of_week}-${cell.hour_of_day}`, cell]))
   const scale = GRID_SCALES[metric]
 
@@ -15,7 +24,7 @@ export function WeeklyGrid({ cells, metric }: { cells: HistoricalCell[]; metric:
       <div className="overflow-x-auto rounded-md border border-border bg-card">
         <table className="w-full min-w-4xl table-fixed border-collapse text-xs">
           <caption className="sr-only">
-            {scale.title} by day of week and hour of day, Boston time
+            {scale.title} by day of week and hour of day, {cityName} time
           </caption>
           <colgroup>
             <col className="w-20" />

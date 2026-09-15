@@ -29,6 +29,7 @@ class HistoricalCellOut(PerformanceOut):
 # Response body for GET /api/v1/routes/{route_id}/historical. Dates are inclusive and in the agency
 # timezone. cells always holds all 168 day/hour combinations, Monday 00:00 first.
 class HistoricalRouteOut(BaseModel):
+    agency: str
     route_id: str
     route_short_name: str | None
     route_long_name: str | None
@@ -44,6 +45,7 @@ class HistoricalRouteOut(BaseModel):
 # One route in the rankings, with its averages over the period.
 class RankedRouteOut(BaseModel):
     rank: int
+    agency: str
     route_id: str
     route_short_name: str | None
     route_long_name: str | None
@@ -59,6 +61,7 @@ class RankedRouteOut(BaseModel):
 # Response body for GET /api/v1/performance/rankings. The period covers complete hours only.
 # excluded_routes counts routes left out for having fewer than min_samples samples.
 class RankingsOut(BaseModel):
+    region: str
     metric: RankingMetric
     days: int
     min_samples: int

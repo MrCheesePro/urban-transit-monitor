@@ -21,11 +21,15 @@ export function TermsPage() {
 
         <h2>Information only</h2>
         <p>
-          Delays, arrival times, and statistics on Linecheck are estimates calculated from public MBTA data. They
-          can be incomplete, delayed, or wrong, for example when the MBTA&apos;s feeds are unavailable. Do not rely
-          on Linecheck when timing matters; check official MBTA sources such as{' '}
+          Delays, arrival times, and statistics on Linecheck are estimates calculated from public MBTA and LA
+          Metro data. They can be incomplete, delayed, or wrong, for example when an agency&apos;s feeds are
+          unavailable. Do not rely on Linecheck when timing matters; check official sources such as{' '}
           <a href="https://www.mbta.com" target="_blank" rel="noreferrer">
             mbta.com
+          </a>{' '}
+          or{' '}
+          <a href="https://www.metro.net" target="_blank" rel="noreferrer">
+            metro.net
           </a>{' '}
           before you travel. <Link to="/how-it-works">How it works</Link> explains how each figure is calculated.
         </p>
@@ -43,13 +47,18 @@ export function TermsPage() {
           travel delays.
         </p>
 
-        <h2>Relationship to the MBTA</h2>
+        <h2>Relationship to the MBTA and LA Metro</h2>
         <p>
-          Linecheck is not affiliated with or endorsed by the Massachusetts Bay Transportation Authority. Line
-          names and line colors are used only to identify MBTA services. Transit data is provided by the MBTA and
-          is subject to the MBTA&apos;s own terms for developers, described at{' '}
+          Linecheck is not affiliated with or endorsed by the Massachusetts Bay Transportation Authority or the
+          Los Angeles County Metropolitan Transportation Authority. Line names and line colors are used only to
+          identify each agency&apos;s services. Transit data is provided by those agencies and is subject to their
+          own terms for developers, described at{' '}
           <a href="https://www.mbta.com/developers" target="_blank" rel="noreferrer">
             mbta.com/developers
+          </a>{' '}
+          and{' '}
+          <a href="https://developer.metro.net" target="_blank" rel="noreferrer">
+            developer.metro.net
           </a>
           .
         </p>

@@ -1,4 +1,4 @@
-"""Poll the GTFS-Realtime feeds and store vehicle snapshots in Postgres."""
+"""Poll one agency's GTFS-Realtime feeds and store its vehicle snapshots in Postgres."""
 
 import datetime as dt
 import logging
@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Connection, Engine, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 
-from app.core.config import Settings
+from app.core.agencies import Agency
 from app.db.models import RealtimeFeedState, VehicleLatest, VehiclePosition
 from app.db.partitions import ensure_partitions
 from app.gtfs import realtime as rt
@@ -19,7 +19,8 @@ from app.metrics.delay import estimate_delay, next_stop_prediction
 
 logger = logging.getLogger(__name__)
 
-# A function that downloads a URL and returns its bytes. Injected so tests can supply fake feeds.
+# A function that downloads a URL and returns its bytes. Injected so tests can supply fake feeds;
+# the worker builds one that sends the agency's API key header.
 Fetcher = Callable[[str], bytes]
 
 
@@ -32,19 +33,21 @@ class PollResult:
     with_delay: int
 
 
-# Download both feeds at the same time (two threads) so a slow response does not double the poll.
-# The vehicle feed is required and its errors propagate. Trip updates are optional: if that
-# download fails, vehicles are still stored, just without delay estimates.
-def fetch_both(settings: Settings, fetch: Fetcher) -> tuple[bytes, bytes | None]:
+# Download an agency's vehicle feed and trip update feed at the same time (two threads) so a slow
+# response does not double the poll. The vehicle feed is required and its errors propagate. Trip
+# updates are optional: if that download fails, vehicles are still stored, just without delays.
+def fetch_both(agency: Agency, fetch: Fetcher) -> tuple[bytes, bytes | None]:
     with ThreadPoolExecutor(max_workers=2) as pool:
-        vehicles_future = pool.submit(fetch, settings.mbta_vehicle_positions_url)
-        trips_future = pool.submit(fetch, settings.mbta_trip_updates_url)
+        vehicles_future = pool.submit(fetch, agency.vehicle_positions_url)
+        trips_future = pool.submit(fetch, agency.trip_updates_url)
         vehicle_bytes = vehicles_future.result()
         try:
             trip_bytes: bytes | None = trips_future.result()
         except Exception:
             logger.warning(
-                "trip updates download failed; storing vehicles without delay", exc_info=True
+                "%s trip updates download failed; storing vehicles without delay",
+                agency.slug,
+                exc_info=True,
             )
             trip_bytes = None
     return vehicle_bytes, trip_bytes
@@ -57,16 +60,17 @@ _SCHEDULE_FOR_PAIRS_SQL = text(
     JOIN unnest(CAST(:trip_ids AS text[]), CAST(:stop_sequences AS integer[]))
          AS wanted(trip_id, stop_sequence)
       ON times.trip_id = wanted.trip_id AND times.stop_sequence = wanted.stop_sequence
+    WHERE times.agency = :agency
     """
 )
 
 
-# Look up the scheduled (arrival_secs, departure_secs) for many (trip_id, stop_sequence) pairs in a
-# single query, instead of one query per vehicle. The pairs are sent as two parallel arrays and
-# joined with unnest, because a literal "(trip_id, stop_sequence) IN (...)" list with thousands of
-# pairs makes Postgres fail with "stack depth limit exceeded".
+# Look up one agency's scheduled (arrival_secs, departure_secs) for many (trip_id, stop_sequence)
+# pairs in a single query, instead of one query per vehicle. The pairs are sent as two parallel
+# arrays and joined with unnest, because a literal "(trip_id, stop_sequence) IN (...)" list with
+# thousands of pairs makes Postgres fail with "stack depth limit exceeded".
 def load_schedule(
-    conn: Connection, pairs: set[tuple[str, int]]
+    conn: Connection, agency: str, pairs: set[tuple[str, int]]
 ) -> dict[tuple[str, int], tuple[int | None, int | None]]:
     if not pairs:
         return {}
@@ -74,6 +78,7 @@ def load_schedule(
     rows = conn.execute(
         _SCHEDULE_FOR_PAIRS_SQL,
         {
+            "agency": agency,
             "trip_ids": [trip_id for trip_id, _ in ordered],
             "stop_sequences": [sequence for _, sequence in ordered],
         },
@@ -84,9 +89,10 @@ def load_schedule(
 
 
 # Estimate each vehicle's delay: find its trip's prediction for the next stop, look up that stop's
-# scheduled time, and compare. Vehicles that cannot be matched get None.
+# scheduled time in the agency's timetable, and compare. Vehicles that cannot be matched get None.
 def compute_delays(
     conn: Connection,
+    agency: str,
     vehicles: list[rt.VehicleObservation],
     predictions: dict[str, rt.TripPrediction],
     timezone: ZoneInfo,
@@ -99,7 +105,9 @@ def compute_delays(
             matches[vehicle.vehicle_id] = (prediction, stop, stop.stop_sequence)
 
     schedule = load_schedule(
-        conn, {(prediction.trip_id, sequence) for prediction, _, sequence in matches.values()}
+        conn,
+        agency,
+        {(prediction.trip_id, sequence) for prediction, _, sequence in matches.values()},
     )
 
     delays: dict[str, int | None] = {}
@@ -118,23 +126,29 @@ def compute_delays(
     return delays
 
 
-# Read the header timestamp saved by the previous poll of a feed (None on the very first poll).
-def _previous_header(conn: Connection, feed: str) -> dt.datetime | None:
+# Read the header timestamp saved by the previous poll of one agency's feed (None the first time).
+def _previous_header(conn: Connection, agency: str, feed: str) -> dt.datetime | None:
     return conn.execute(
-        select(RealtimeFeedState.header_timestamp).where(RealtimeFeedState.feed == feed)
+        select(RealtimeFeedState.header_timestamp).where(
+            RealtimeFeedState.agency == agency, RealtimeFeedState.feed == feed
+        )
     ).scalar_one_or_none()
 
 
-# Save a feed's latest header timestamp and entity count, inserting or updating its row.
+# Save one agency's latest header timestamp and entity count for a feed, inserting or updating.
 def _save_feed_state(
-    conn: Connection, feed: str, header: dt.datetime | None, entity_count: int
+    conn: Connection, agency: str, feed: str, header: dt.datetime | None, entity_count: int
 ) -> None:
     statement = insert(RealtimeFeedState).values(
-        feed=feed, header_timestamp=header, entity_count=entity_count, fetched_at=func.now()
+        agency=agency,
+        feed=feed,
+        header_timestamp=header,
+        entity_count=entity_count,
+        fetched_at=func.now(),
     )
     conn.execute(
         statement.on_conflict_do_update(
-            index_elements=[RealtimeFeedState.feed],
+            index_elements=[RealtimeFeedState.agency, RealtimeFeedState.feed],
             set_={
                 "header_timestamp": statement.excluded.header_timestamp,
                 "entity_count": statement.excluded.entity_count,
@@ -153,12 +167,12 @@ def _store_vehicles(conn: Connection, rows: list[dict[str, Any]]) -> None:
 
     latest = insert(VehicleLatest)
     updates: dict[str, Any] = {
-        name: latest.excluded[name] for name in rows[0] if name != "vehicle_id"
+        name: latest.excluded[name] for name in rows[0] if name not in ("agency", "vehicle_id")
     }
     updates["updated_at"] = func.now()
     conn.execute(
         latest.on_conflict_do_update(
-            index_elements=[VehicleLatest.vehicle_id],
+            index_elements=[VehicleLatest.agency, VehicleLatest.vehicle_id],
             set_=updates,
             where=latest.excluded.feed_timestamp >= VehicleLatest.feed_timestamp,
         ),
@@ -166,48 +180,58 @@ def _store_vehicles(conn: Connection, rows: list[dict[str, Any]]) -> None:
     )
 
 
-# Run one polling cycle:
+# Run one polling cycle for one agency:
 # 1. download both feeds and decode them;
 # 2. skip if the vehicle feed's header timestamp matches the previous poll (nothing new published);
-# 3. estimate delays from trip updates + the static timetable;
+# 3. estimate delays from trip updates + the agency's timetable, in the agency's timezone;
 # 4. store history rows, update vehicle_latest, and record each feed's header timestamp.
 # All database writes happen in one transaction.
-def poll_once(engine: Engine, settings: Settings, fetch: Fetcher) -> PollResult:
-    vehicle_bytes, trip_bytes = fetch_both(settings, fetch)
+def poll_once(engine: Engine, agency: Agency, fetch: Fetcher) -> PollResult:
+    vehicle_bytes, trip_bytes = fetch_both(agency, fetch)
     vehicle_message = rt.decode_feed(vehicle_bytes)
     trip_message = None
     if trip_bytes is not None:
         try:
             trip_message = rt.decode_feed(trip_bytes)
         except ValueError:
-            logger.warning("trip updates feed could not be decoded; storing vehicles without delay")
+            logger.warning(
+                "%s trip updates feed could not be decoded; storing vehicles without delay",
+                agency.slug,
+            )
 
     header = rt.header_timestamp(vehicle_message)
-    timezone = ZoneInfo(settings.timezone)
+    timezone = ZoneInfo(agency.timezone)
 
     with engine.begin() as conn:
-        if header is not None and header == _previous_header(conn, rt.VEHICLE_POSITIONS_FEED):
-            logger.info("vehicle feed unchanged since %s, skipping", header.isoformat())
+        previous = _previous_header(conn, agency.slug, rt.VEHICLE_POSITIONS_FEED)
+        if header is not None and header == previous:
+            logger.info("%s vehicle feed unchanged since %s, skipping", agency.slug, header)
             return PollResult(skipped=True, vehicles=0, with_delay=0)
 
         vehicles = rt.latest_per_vehicle(rt.parse_vehicle_positions(vehicle_message))
         predictions = rt.parse_trip_updates(trip_message) if trip_message is not None else {}
-        delays = compute_delays(conn, vehicles, predictions, timezone)
+        delays = compute_delays(conn, agency.slug, vehicles, predictions, timezone)
         rows = [
-            {**asdict(vehicle), "delay_seconds": delays[vehicle.vehicle_id]} for vehicle in vehicles
+            {"agency": agency.slug, **asdict(vehicle), "delay_seconds": delays[vehicle.vehicle_id]}
+            for vehicle in vehicles
         ]
         if rows:
             _store_vehicles(conn, rows)
 
-        _save_feed_state(conn, rt.VEHICLE_POSITIONS_FEED, header, len(vehicle_message.entity))
+        _save_feed_state(
+            conn, agency.slug, rt.VEHICLE_POSITIONS_FEED, header, len(vehicle_message.entity)
+        )
         if trip_message is not None:
             _save_feed_state(
                 conn,
+                agency.slug,
                 rt.TRIP_UPDATES_FEED,
                 rt.header_timestamp(trip_message),
                 len(trip_message.entity),
             )
 
     with_delay = sum(delay is not None for delay in delays.values())
-    logger.info("stored %d vehicles (%d with delay estimates)", len(rows), with_delay)
+    logger.info(
+        "%s: stored %d vehicles (%d with delay estimates)", agency.slug, len(rows), with_delay
+    )
     return PollResult(skipped=False, vehicles=len(rows), with_delay=with_delay)

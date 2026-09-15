@@ -26,6 +26,7 @@ def test_success_is_recorded(engine: Engine) -> None:
     run = _latest_run(engine, "test_job_ok")
     assert run["status"] == "success"
     assert run["rows"] == 42
+    assert run["agency"] is None
     assert run["finished_at"] is not None
 
 
@@ -50,3 +51,16 @@ def test_skips_when_lock_is_held(engine: Engine) -> None:
         other.execute(text("SELECT pg_advisory_unlock(hashtext('test_job_locked'))"))
     assert status == "skipped"
     assert calls == []
+
+
+# Locks are per agency: while the MBTA run of a job is locked, the same job still runs for LA
+# Metro, and the run records which agency it was for.
+def test_agency_runs_lock_separately_and_are_recorded(engine: Engine) -> None:
+    with engine.connect() as other:
+        other.execute(text("SELECT pg_advisory_lock(hashtext('test_job_pair:mbta'))"))
+        mbta_status = run_job(engine, "test_job_pair", lambda: 1, agency="mbta")
+        la_status = run_job(engine, "test_job_pair", lambda: 2, agency="lametro-rail")
+        other.execute(text("SELECT pg_advisory_unlock(hashtext('test_job_pair:mbta'))"))
+    assert (mbta_status, la_status) == ("skipped", "success")
+    run = _latest_run(engine, "test_job_pair")
+    assert (run["agency"], run["rows"]) == ("lametro-rail", 2)

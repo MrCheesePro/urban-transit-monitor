@@ -1,6 +1,6 @@
-"""Load a static GTFS feed (the published timetable) into Postgres.
+"""Load a static GTFS feed (an agency's published timetable) into Postgres.
 
-Run manually with: uv run python -m app.gtfs.static_loader [--file PATH] [--force]
+Run manually with: uv run python -m app.gtfs.static_loader [--agency SLUG] [--file PATH] [--force]
 """
 
 import argparse
@@ -20,7 +20,8 @@ import psycopg
 from psycopg import sql
 from sqlalchemy import Engine, text
 
-from app.core.config import get_settings
+from app.core.agencies import Agency, enabled_agencies
+from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.session import get_engine
 from app.gtfs import parsing as p
@@ -31,7 +32,8 @@ Converter = Callable[[str], Any]
 
 
 # Describes how one GTFS text file maps onto one database table: which CSV columns to read,
-# which table columns they go into, and how to convert each raw string.
+# which table columns they go into, and how to convert each raw string. The agency column is
+# added separately, since it is the same for every row of a feed.
 @dataclass(frozen=True)
 class TableSpec:
     filename: str
@@ -134,8 +136,8 @@ class LoadResult:
         return sum(self.row_counts.values())
 
 
-# Download the static GTFS zip to `dest`. It streams to disk in chunks so the ~30 MB file is
-# never held in memory all at once. Raises on HTTP errors (4xx/5xx) or timeouts.
+# Download a static GTFS zip to `dest`. It streams to disk in chunks so a large file is never held
+# in memory all at once. Raises on HTTP errors (4xx/5xx) or timeouts.
 def download_feed(url: str, dest: Path, timeout_seconds: float) -> Path:
     with httpx.stream("GET", url, timeout=timeout_seconds, follow_redirects=True) as response:
         response.raise_for_status()
@@ -146,8 +148,8 @@ def download_feed(url: str, dest: Path, timeout_seconds: float) -> Path:
 
 
 # Work out a version string for a feed. Prefer feed_version from feed_info.txt; if the agency
-# does not publish one, fall back to a SHA-256 hash of the zip so an unchanged file is still
-# recognised and skipped.
+# does not publish one (LA Metro leaves it blank), fall back to a SHA-256 hash of the zip so an
+# unchanged file is still recognised and skipped.
 def feed_version(zip_path: Path, zf: zipfile.ZipFile) -> str:
     if "feed_info.txt" in zf.namelist():
         with zf.open("feed_info.txt") as raw:
@@ -175,26 +177,33 @@ def iter_rows(zf: zipfile.ZipFile, spec: TableSpec) -> Iterator[tuple[Any, ...]]
 
 
 # Stream one GTFS file into its table using Postgres COPY, which is far faster than INSERT
-# statements for the ~4 million stop_times rows. Returns how many rows were copied.
-def _copy_table(dbapi_conn: psycopg.Connection[Any], zf: zipfile.ZipFile, spec: TableSpec) -> int:
+# statements for millions of stop_times rows. Every row is tagged with `agency`. Returns how many
+# rows were copied.
+def _copy_table(
+    dbapi_conn: psycopg.Connection[Any], zf: zipfile.ZipFile, spec: TableSpec, agency: str
+) -> int:
+    columns = ["agency", *(column for _, column, _ in spec.columns)]
     statement = sql.SQL("COPY {} ({}) FROM STDIN").format(
         sql.Identifier(spec.table),
-        sql.SQL(", ").join(sql.Identifier(column) for _, column, _ in spec.columns),
+        sql.SQL(", ").join(sql.Identifier(column) for column in columns),
     )
     count = 0
     with dbapi_conn.cursor() as cursor, cursor.copy(statement) as copy:
         for row in iter_rows(zf, spec):
-            copy.write_row(row)
+            copy.write_row((agency, *row))
             count += 1
-    logger.info("loaded %s: %d rows", spec.table, count)
+    logger.info("loaded %s for %s: %d rows", spec.table, agency, count)
     return count
 
 
-# Load a GTFS zip into the static tables, replacing whatever was there before.
-# - Skips the load if this feed version is already recorded, unless force=True.
-# - Runs in a single transaction, so if anything fails the previous schedule stays intact.
-# - TRUNCATE locks the tables, so API reads of them wait until the load commits (about a minute).
-def load_static_gtfs(engine: Engine, zip_path: Path, force: bool = False) -> LoadResult:
+# Load a GTFS zip into the static tables for one agency, replacing that agency's previous
+# timetable. Other agencies' rows are never touched.
+# - Skips the load if this agency already has this feed version, unless force=True.
+# - Runs in a single transaction, so if anything fails the previous timetable stays intact.
+# - Old rows are removed with DELETE (children before parents, so trips go before routes).
+def load_static_gtfs(
+    engine: Engine, zip_path: Path, agency: str, force: bool = False
+) -> LoadResult:
     with zipfile.ZipFile(zip_path) as zf:
         names = set(zf.namelist())
         missing = [
@@ -206,63 +215,78 @@ def load_static_gtfs(engine: Engine, zip_path: Path, force: bool = False) -> Loa
 
         with engine.begin() as conn:
             already_loaded = conn.execute(
-                text("SELECT 1 FROM feed_versions WHERE version = :version"), {"version": version}
+                text("SELECT 1 FROM feed_versions WHERE agency = :agency AND version = :version"),
+                {"agency": agency, "version": version},
             ).first()
             if already_loaded and not force:
-                logger.info("static GTFS version %r already loaded, skipping", version)
+                logger.info("%s static GTFS version %r already loaded, skipping", agency, version)
                 return LoadResult(version=version, loaded=False)
 
-            conn.execute(text("TRUNCATE " + ", ".join(spec.table for spec in TABLE_SPECS)))
+            for spec in reversed(TABLE_SPECS):
+                conn.execute(
+                    text(f"DELETE FROM {spec.table} WHERE agency = :agency"), {"agency": agency}
+                )
             dbapi_conn = cast(psycopg.Connection[Any], conn.connection.driver_connection)
             result = LoadResult(version=version, loaded=True)
             for spec in TABLE_SPECS:
                 if spec.filename in names:
-                    result.row_counts[spec.table] = _copy_table(dbapi_conn, zf, spec)
+                    result.row_counts[spec.table] = _copy_table(dbapi_conn, zf, spec, agency)
                 else:
                     result.row_counts[spec.table] = 0
             conn.execute(
                 text(
-                    "INSERT INTO feed_versions (version) VALUES (:version) "
-                    "ON CONFLICT (version) DO UPDATE SET loaded_at = now()"
+                    "INSERT INTO feed_versions (agency, version) VALUES (:agency, :version) "
+                    "ON CONFLICT (agency, version) DO UPDATE SET loaded_at = now()"
                 ),
-                {"version": version},
+                {"agency": agency, "version": version},
             )
 
-    logger.info("static GTFS version %r loaded: %d rows", version, result.total_rows)
+    logger.info("%s static GTFS version %r loaded: %d rows", agency, version, result.total_rows)
     return result
 
 
-# Download the configured MBTA feed into a temporary folder and load it. The temporary folder
-# (and the zip) is deleted automatically afterwards. This is what the scheduled worker job runs.
-def download_and_load(engine: Engine, force: bool = False) -> LoadResult:
-    settings = get_settings()
+# Download an agency's timetable into a temporary folder and load it. The temporary folder (and
+# the zip) is deleted automatically afterwards. This is what the scheduled worker job runs.
+def download_and_load(
+    engine: Engine, settings: Settings, agency: Agency, force: bool = False
+) -> LoadResult:
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = download_feed(
-            settings.mbta_static_gtfs_url, Path(tmp) / "gtfs.zip", settings.http_timeout_seconds
+            agency.static_gtfs_url, Path(tmp) / "gtfs.zip", settings.http_timeout_seconds
         )
-        return load_static_gtfs(engine, zip_path, force=force)
+        return load_static_gtfs(engine, zip_path, agency.slug, force=force)
 
 
-# Command-line entry point. Loads from a local zip with --file, otherwise downloads from MBTA.
-# Goes through run_job so a manual load never overlaps with the worker's scheduled load.
+# Command-line entry point. Loads every enabled agency's timetable, or one with --agency. With
+# --file, loads a local zip instead of downloading (this needs --agency). Goes through run_job so
+# a manual load never overlaps with the worker's scheduled load of the same agency.
 def main(argv: list[str] | None = None) -> None:
     from app.worker.jobs import run_job  # imported here to avoid a circular import
 
-    parser = argparse.ArgumentParser(description="Load MBTA static GTFS into Postgres.")
+    settings = get_settings()
+    agencies = {agency.slug: agency for agency in enabled_agencies(settings)}
+    parser = argparse.ArgumentParser(description="Load static GTFS timetables into Postgres.")
+    parser.add_argument("--agency", choices=sorted(agencies), help="load only this agency")
     parser.add_argument("--file", type=Path, help="load this local GTFS zip instead of downloading")
     parser.add_argument("--force", action="store_true", help="reload even if already loaded")
     args = parser.parse_args(argv)
+    if args.file and not args.agency:
+        parser.error("--file needs --agency to say whose timetable it is")
     configure_logging()
     engine = get_engine()
 
-    # The work run_job executes: load from the chosen source and report the row count.
-    def work() -> int:
-        if args.file:
-            return load_static_gtfs(engine, args.file, force=args.force).total_rows
-        return download_and_load(engine, force=args.force).total_rows
+    failed = False
+    for slug in [args.agency] if args.agency else list(agencies):
+        agency = agencies[slug]
 
-    status = run_job(engine, "load_static_gtfs", work)
-    raise SystemExit(1 if status == "failed" else 0)
+        # The work run_job executes for this agency: load from the chosen source, report row count.
+        def work(agency: Agency = agency) -> int:
+            if args.file:
+                return load_static_gtfs(engine, args.file, agency.slug, force=args.force).total_rows
+            return download_and_load(engine, settings, agency, force=args.force).total_rows
+
+        failed |= run_job(engine, "load_static_gtfs", work, agency=slug) == "failed"
+    raise SystemExit(1 if failed else 0)
 
 
 if __name__ == "__main__":

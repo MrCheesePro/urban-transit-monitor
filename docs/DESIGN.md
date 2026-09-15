@@ -1,7 +1,14 @@
 # Design: Urban Public Transit Reliability & Delay Monitor
 
 ## Goal
-Monitor MBTA live vehicle feeds, detect delays against the scheduled timetable, and produce historical route performance metrics (delay, on-time percentage, headway variance) through a REST API.
+Monitor live vehicle feeds for Boston (MBTA) and Los Angeles (LA Metro bus and rail), detect delays against each scheduled timetable, and produce historical route performance metrics (delay, on-time percentage, headway variance) through a REST API.
+
+## Agencies and regions
+- An **agency** is one static GTFS feed plus its two realtime feeds: `mbta`, `lametro-bus`, `lametro-rail` (LA Metro publishes buses and trains as separate feeds). A **region** is a city on the website: `boston` holds `mbta`, `los-angeles` holds both LA Metro agencies. The registry is `app/core/agencies.py`; `ENABLED_REGIONS` switches cities on.
+- One database for all agencies. Every table has an `agency` column first in its primary key (migration `7c1d2e3f4a5b`), so the same route, trip, stop, or vehicle id can exist in two agencies. `feed_versions` is unique on `(agency, version)`; `ingest_runs.agency` is null for jobs that cover everyone (retention).
+- Each agency has its own time zone for service days, grid hours, and the 03:00 timetable job.
+- Every job except retention runs once per agency, with its own advisory lock (`job:agency`).
+- LA Metro timetables are open GitLab zips with an empty `feed_version`, so the loader falls back to a sha256 of the zip. LA Metro realtime comes from Swiftly (`api.goswift.ly/real-time/{lametro,lametro-rail}/gtfs-rt-*`) and needs `LA_METRO_API_KEY`, sent in `LA_METRO_API_KEY_HEADER` (default `Authorization`). Without a key the scheduler skips LA live jobs, `/health` reports them `not_configured`, and responses carry `realtime_configured: false`.
 
 ## Architecture
 
@@ -24,9 +31,11 @@ Monitor MBTA live vehicle feeds, detect delays against the scheduled timetable, 
 retention (daily): create future partitions, drop vehicle_positions partitions older than 14 days
 ```
 
-Data sources:
-- Static: `https://cdn.mbta.com/MBTA_GTFS.zip`
-- Realtime: `https://cdn.mbta.com/realtime/VehiclePositions.pb`, `https://cdn.mbta.com/realtime/TripUpdates.pb`
+Data sources (per agency; the diagram shows the MBTA):
+- MBTA static: `https://cdn.mbta.com/MBTA_GTFS.zip`
+- MBTA realtime: `https://cdn.mbta.com/realtime/VehiclePositions.pb`, `https://cdn.mbta.com/realtime/TripUpdates.pb`
+- LA Metro static: `https://gitlab.com/LACMTA/gtfs_bus/-/raw/master/gtfs_bus.zip`, `https://gitlab.com/LACMTA/gtfs_rail/-/raw/master/gtfs_rail.zip`
+- LA Metro realtime (API key): `https://api.goswift.ly/real-time/lametro/gtfs-rt-vehicle-positions` and `.../gtfs-rt-trip-updates`, and the same under `lametro-rail`
 
 ## Why this differs from the original draft
 | # | Gap in draft | Fix |
@@ -47,6 +56,7 @@ Data sources:
 | 14 | "FastAPI / Express" undecided | FastAPI |
 
 ## Schema (PostgreSQL 16)
+Every table below also has `agency text` as the first column of its primary key (and of `realtime_feed_state`'s key and the trips to routes foreign key). It is left out of the column lists for readability.
 
 ### Static GTFS
 ```sql
@@ -147,21 +157,31 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 ## API (`/api/v1`)
 | Endpoint | Returns |
 |---|---|
-| `GET /routes` | route list |
+| `GET /regions` | enabled regions with their agencies and `realtime_configured` per agency |
+| `GET /regions/{region}/routes?route_type=` | the region's routes, agency order then sort order; 404 unknown region |
+| `GET /regions/{region}/live` | region-wide snapshot (as `/system/live` below, across the region's agencies; `as_of` is the oldest agency's latest snapshot) |
+| `GET /regions/{region}/rankings?...` | as `/performance/rankings` below, ranking the region's routes across its agencies |
+| `GET /agencies/{agency}/routes/{id}/live` and `/historical` | as `/routes/{id}/live` and `/historical` below, in the agency's time zone; 404 unknown agency |
+
+The rows below describe the behavior of each view; their original single-agency paths were replaced by the paths above.
+
+| Endpoint | Returns |
+|---|---|
 | `GET /routes/{id}/live?direction_id=` | vehicles seen in the last `LIVE_VEHICLE_MAX_AGE_SECONDS` (position, delay, severity), route summary, `as_of`, `data_age_seconds`, `stale`; 404 for unknown routes |
 | `GET /routes/{id}/historical?direction_id=&start_date=&end_date=` | all 168 cells of the local day-of-week × hour grid (sample counts, avg and absolute delay, on-time %, avg headway, headway CV, excess wait) plus a period summary; local inclusive dates, default last 30 days, max 366; 404 unknown route, 422 bad range |
 | `GET /performance/rankings?metric=on_time\|delay\|headway&days=30&min_samples=&route_type=&limit=` | routes ordered most → least reliable over complete hours, both directions combined, with `excluded_routes` for those below `min_samples`; days 1-90 |
 | `GET /system/live` | network-wide snapshot of vehicles seen in the last `LIVE_VEHICLE_MAX_AGE_SECONDS`: severity counts, median and worst delay, the same per mode (route_type), data age |
-| `GET /health` | always 200; `status` ok only if the database is up and every job is ok. Per job: `state` (ok, failing = latest finished run failed, stale = no success within its max age, never_run), last status, last success, seconds since success, last error |
+| `GET /health` | always 200; `status` ok only if the database is up and every job that should run is ok. Per job and agency: `state` (ok, failing = latest finished run failed, stale = no success within its max age, never_run, not_configured = needs an API key and does not count against status), last status, last success, seconds since success, last error |
 
 ## Configuration (env, pydantic-settings)
-`DATABASE_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `STOP_EVENTS_INTERVAL_SECONDS=300`, `STOP_EVENTS_ACTIVE_WINDOW_MINUTES=15`, `STOP_EVENTS_HISTORY_HOURS=4`, `STOP_EVENT_MAX_GAP_SECONDS=600`, `AGGREGATE_LOOKBACK_HOURS=3`, `HISTORICAL_DEFAULT_DAYS=30`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `PARTITION_DAYS_AHEAD=3`, `STOP_EVENTS_RETENTION_DAYS=90`, `HOURLY_PERFORMANCE_RETENTION_DAYS=400`, `INGEST_RUNS_RETENTION_DAYS=30`, `VEHICLE_LATEST_RETENTION_HOURS=24`, `RETENTION_BATCH_SIZE=10000`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York`.
+`DATABASE_URL`, `ENABLED_REGIONS=["boston","los-angeles"]`, `LA_METRO_API_KEY`, `LA_METRO_API_KEY_HEADER=Authorization`, `LA_METRO_BUS_STATIC_GTFS_URL`, `LA_METRO_BUS_VEHICLE_POSITIONS_URL`, `LA_METRO_BUS_TRIP_UPDATES_URL`, `LA_METRO_RAIL_STATIC_GTFS_URL`, `LA_METRO_RAIL_VEHICLE_POSITIONS_URL`, `LA_METRO_RAIL_TRIP_UPDATES_URL`, `MBTA_VEHICLE_POSITIONS_URL`, `MBTA_TRIP_UPDATES_URL`, `MBTA_STATIC_GTFS_URL`, `HTTP_TIMEOUT_SECONDS=60`, `REALTIME_HTTP_TIMEOUT_SECONDS=15`, `POLL_INTERVAL_SECONDS=60`, `ON_TIME_EARLY_SECONDS=-60`, `ON_TIME_LATE_SECONDS=300`, `SEVERITY_MAJOR_SECONDS=600`, `SEVERITY_SEVERE_SECONDS=1200`, `LIVE_VEHICLE_MAX_AGE_SECONDS=300`, `FEED_STALE_AFTER_SECONDS=180`, `STOP_EVENTS_INTERVAL_SECONDS=300`, `STOP_EVENTS_ACTIVE_WINDOW_MINUTES=15`, `STOP_EVENTS_HISTORY_HOURS=4`, `STOP_EVENT_MAX_GAP_SECONDS=600`, `AGGREGATE_LOOKBACK_HOURS=3`, `HISTORICAL_DEFAULT_DAYS=30`, `FREQUENT_HEADWAY_SECONDS=900`, `RETENTION_DAYS=14`, `PARTITION_DAYS_AHEAD=3`, `STOP_EVENTS_RETENTION_DAYS=90`, `HOURLY_PERFORMANCE_RETENTION_DAYS=400`, `INGEST_RUNS_RETENTION_DAYS=30`, `VEHICLE_LATEST_RETENTION_HOURS=24`, `RETENTION_BATCH_SIZE=10000`, `RANKING_MIN_SAMPLES=200`, `TIMEZONE=America/New_York` (only for jobs that are not per agency).
 
 ## Testing
 - Unit: pure functions in `app/metrics` (matching, delay, headway, aggregation), including post-midnight trips and cancelled trips.
 - Integration: Postgres in Docker/CI. Load a small GTFS fixture, replay recorded `.pb` snapshots, assert `stop_events` and aggregates.
 - API: FastAPI `TestClient` against seeded data.
-- Never call live MBTA endpoints in tests.
+- Agency separation: the fixture timetable is loaded as both `mbta` and `lametro-rail` so tests prove loads, polls, stop events, aggregates, rankings, and API views never mix agencies.
+- Never call live agency endpoints in tests.
 
 ## Milestones
 All of M0 through M5 are complete.
@@ -178,21 +198,25 @@ All of M0 through M5 are complete.
 - ADDED trips (common on MBTA subway) have no timetable, so they get no delay and no stop events. Headway for them could be measured from vehicle positions alone.
 - Direction names: `directions.txt` (for example "Inbound" and "Outbound") is not loaded, so the website says "Direction 0" and "Direction 1".
 - Deployment to a custom domain. The website currently runs locally only.
+- LA Metro live feeds: the Swiftly paths and the key header follow Swiftly's documented pattern but are unverified until a real key is configured (every probe without a key returned 401).
 
 ## Website (Linecheck)
 A React single-page app in `web/`, served by nginx in Docker at `http://localhost:8080` (or by Vite at `:5173` during development). nginx forwards `/api` and `/health` to the api container, so the browser only ever talks to one origin and the API needs no CORS setup.
 
 | Page | Address | Data |
 |---|---|---|
-| Home | `/` | `/system/live` (network now, by mode), `/performance/rankings?days=1&min_samples=50` (most and least reliable) |
-| Lines | `/lines` | `/routes`, grouped by mode with search |
-| Line live | `/lines/{id}` | `/routes/{id}/live` every 30 s: map, vehicle table with stop names, summary |
-| Line history | `/lines/{id}/history` | `/routes/{id}/historical`: period totals and the weekly day-by-hour grid |
-| Rankings | `/rankings` | `/performance/rankings`, filters kept in the address bar |
-| Status | `/status` | `/health` every 30 s |
+| Home | `/` | `/regions`, and `/regions/{region}/live` per city with live feeds connected |
+| City overview | `/{region}` | `/regions/{region}/live` (network now, by mode), `/regions/{region}/rankings?days=1&min_samples=50` (most and least reliable) |
+| Lines | `/{region}/lines` | `/regions/{region}/routes`, grouped by mode with search |
+| Line live | `/{region}/lines/{agency}/{id}` | `/agencies/{agency}/routes/{id}/live` every 30 s: map, vehicle table with stop names, summary |
+| Line history | `/{region}/lines/{agency}/{id}/history` | `/agencies/{agency}/routes/{id}/historical`: period totals and the weekly day-by-hour grid |
+| Rankings | `/{region}/rankings` | `/regions/{region}/rankings`, filters kept in the address bar |
+| Status | `/status` | `/health` every 30 s, one row per job and agency |
+
+The header has a city switcher that keeps the reader in the same section (lines or rankings). Times on city pages are in that city's time zone. A city without connected live feeds shows a plain notice in place of live figures and rankings; its lines and timetables still work.
 | How it works, Privacy Policy, Terms & Conditions | `/how-it-works`, `/privacy`, `/terms` | static text |
 
-Design: pale station-tile ground, ink text, a separate six-color severity scale (so it never collides with MBTA line colors, which only appear on route badges from `routes.route_color`), Big Shoulders Display for headings, Public Sans for text, IBM Plex Mono for numbers. Solid colors only; no scroll animations. The weekly grid is a real `<table>` so screen readers announce day and hour for every cell.
+Design: pale station-tile ground, ink text, a separate six-color severity scale (so it never collides with line colors, which only appear on route badges from `routes.route_color`; LA Metro buses have none and use a neutral badge), Big Shoulders Display for headings, Public Sans for text, IBM Plex Mono for numbers. Solid colors only; no scroll animations. The weekly grid is a real `<table>` so screen readers announce day and hour for every cell.
 
 The live endpoint joins `stops` so vehicles are described by stop name ("Stopped at Harvard"); MBTA `stop_sequence` values jump in tens, so they are never shown to riders.
 

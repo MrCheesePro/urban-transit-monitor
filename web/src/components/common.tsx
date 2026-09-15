@@ -9,10 +9,10 @@ import {
   SEVERITY_LABELS,
   SEVERITY_ORDER,
   badgeLabel,
-  bostonTime,
   formatAge,
   formatCount,
   hexColor,
+  localTime,
 } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -52,7 +52,7 @@ export function PageHeader({
   )
 }
 
-// A small tag in the route's official MBTA color with its short label (bus number, line name).
+// A small tag in the route's official color with its short label (bus number, line name).
 // Falls back to neutral colors when the timetable has no color for the route.
 export function RouteBadge({ route, routeId }: { route?: Route; routeId: string }) {
   const background = hexColor(route?.route_color) ?? '#DDE3E0'
@@ -128,36 +128,56 @@ export function StatTile({
   )
 }
 
-// Says when the MBTA published the live data on screen, and warns plainly when it is missing or
-// too old to rely on.
+// Says when the operator (for example "LA Metro") published the live data on screen, as a clock time
+// in the city's own time zone, and warns plainly when it is missing or too old to rely on.
 export function Freshness({
   asOf,
   ageSeconds,
   stale,
+  operator,
+  timeZone,
 }: {
   asOf: string | null
   ageSeconds: number | null
   stale: boolean
+  operator: string
+  timeZone: string
 }) {
   if (!asOf) {
     return (
       <p className="text-sm text-severity-severe">
-        No live data has been received yet. The background worker may not be running.
+        No live {operator} data has been received yet. The background worker may not be running.
       </p>
     )
   }
   if (stale) {
     return (
       <p className="text-sm text-severity-severe">
-        The latest MBTA data is from {bostonTime(asOf)} ({formatAge(ageSeconds)}). Live figures may be
-        out of date.
+        The latest {operator} data is from {localTime(asOf, timeZone)} ({formatAge(ageSeconds)}). Live
+        figures may be out of date.
       </p>
     )
   }
   return (
     <p className="text-sm text-muted-foreground">
-      MBTA data from {bostonTime(asOf)} ({formatAge(ageSeconds)}). Updates every 30 seconds.
+      {operator} data from {localTime(asOf, timeZone)} local time ({formatAge(ageSeconds)}). Updates
+      every 30 seconds.
     </p>
+  )
+}
+
+// Shown in place of live figures for a city whose live feeds are not connected yet (LA Metro's feeds
+// need an API key). Explains what is missing and what still works.
+export function RealtimeNotConnected({ operator }: { operator: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-border bg-card p-5">
+      <p className="font-medium">Live {operator} data is not connected yet.</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {operator}&apos;s live vehicle feeds need an API key, and none is configured on this server. Until one
+        is added there are no vehicle positions, delays, or rankings for this city. Lines and timetables
+        are available now.
+      </p>
+    </div>
   )
 }
 

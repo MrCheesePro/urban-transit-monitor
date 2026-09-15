@@ -11,6 +11,7 @@ class JobHealthOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     job: str
+    agency: str | None
     state: JobState
     last_status: str | None
     last_finished_at: dt.datetime | None

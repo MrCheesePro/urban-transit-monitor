@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 class RouteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    agency: str
     route_id: str
     agency_id: str | None
     route_short_name: str | None

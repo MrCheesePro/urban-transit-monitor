@@ -12,9 +12,39 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://transit:transit@localhost:5434/transit"
 
+    # Which cities to follow (see app/core/agencies.py). In an environment variable this is a JSON
+    # list, for example ENABLED_REGIONS='["boston"]'.
+    enabled_regions: list[str] = ["boston", "los-angeles"]
+
+    # Boston (MBTA). All feeds are open and need no key.
     mbta_vehicle_positions_url: str = "https://cdn.mbta.com/realtime/VehiclePositions.pb"
     mbta_trip_updates_url: str = "https://cdn.mbta.com/realtime/TripUpdates.pb"
     mbta_static_gtfs_url: str = "https://cdn.mbta.com/MBTA_GTFS.zip"
+
+    # Los Angeles (LA Metro). Timetables are open. The live feeds need an API key from LA Metro's
+    # developer program (developer.metro.net), sent in the header named by LA_METRO_API_KEY_HEADER.
+    # Until a key is set, Los Angeles shows timetables only and its live jobs do not run.
+    la_metro_api_key: str | None = None
+    la_metro_api_key_header: str = "Authorization"
+    la_metro_bus_static_gtfs_url: str = (
+        "https://gitlab.com/LACMTA/gtfs_bus/-/raw/master/gtfs_bus.zip"
+    )
+    la_metro_bus_vehicle_positions_url: str = (
+        "https://api.goswift.ly/real-time/lametro/gtfs-rt-vehicle-positions"
+    )
+    la_metro_bus_trip_updates_url: str = (
+        "https://api.goswift.ly/real-time/lametro/gtfs-rt-trip-updates"
+    )
+    la_metro_rail_static_gtfs_url: str = (
+        "https://gitlab.com/LACMTA/gtfs_rail/-/raw/master/gtfs_rail.zip"
+    )
+    la_metro_rail_vehicle_positions_url: str = (
+        "https://api.goswift.ly/real-time/lametro-rail/gtfs-rt-vehicle-positions"
+    )
+    la_metro_rail_trip_updates_url: str = (
+        "https://api.goswift.ly/real-time/lametro-rail/gtfs-rt-trip-updates"
+    )
+
     http_timeout_seconds: float = 60.0
     realtime_http_timeout_seconds: float = 15.0
 
@@ -40,6 +70,8 @@ class Settings(BaseSettings):
     vehicle_latest_retention_hours: int = 24
     retention_batch_size: int = 10000
     ranking_min_samples: int = 200
+    # Timezone for jobs that are not tied to one agency (retention). Each agency's own jobs use
+    # that agency's timezone.
     timezone: str = "America/New_York"
 
     # Reject nonsense delay thresholds at startup. "Early" must be zero or negative and "late"

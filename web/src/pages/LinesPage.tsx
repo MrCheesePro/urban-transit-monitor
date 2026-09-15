@@ -14,7 +14,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { Route } from '@/lib/api'
 import { MODE_ORDER, formatCount, modeName, routeName } from '@/lib/format'
-import { useRoutes } from '@/lib/queries'
+import { routeKey, useRegionRoutes } from '@/lib/queries'
+import { linePath, regionSearchExample, useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
 // Whether a route matches what the reader typed: its displayed name, full name, number, or id.
@@ -27,7 +28,7 @@ function matchesSearch(route: Route, term: string): boolean {
   return haystack.includes(term)
 }
 
-// Split routes into one group per mode, in MODE_ORDER, keeping the MBTA's order inside each group.
+// Split routes into one group per mode, in MODE_ORDER, keeping the API's order inside each group.
 function groupByMode(routes: Route[]): { routeType: number; routes: Route[] }[] {
   const order = [...MODE_ORDER, ...new Set(routes.map((route) => route.route_type))].filter(
     (value, index, all) => all.indexOf(value) === index,
@@ -40,11 +41,12 @@ function groupByMode(routes: Route[]): { routeType: number; routes: Route[] }[] 
     .filter((group) => group.routes.length > 0)
 }
 
-// The lines page: every route in the MBTA timetable grouped by mode, with a search box that filters
-// by name or number. Each route links to its live page.
+// A city's lines page: every route in the city's timetables grouped by mode, with a search box that
+// filters by name or number. Each route links to its live page.
 export function LinesPage() {
-  useDocumentTitle('Lines')
-  const routes = useRoutes()
+  const region = useRegion()
+  useDocumentTitle(`${region.name} lines`)
+  const routes = useRegionRoutes(region.slug)
   const [search, setSearch] = useState('')
   const term = search.trim().toLowerCase()
   const groups = useMemo(
@@ -55,8 +57,9 @@ export function LinesPage() {
   return (
     <Container>
       <PageHeader
+        eyebrow={region.name}
         title="Lines"
-        description="Every route in the MBTA timetable. Pick one to see its vehicles right now and its on-time record by hour."
+        description={`Every route in the ${region.operator} timetable. Pick one to see its vehicles right now and its on-time record by hour.`}
       />
       <div className="mt-6 max-w-sm">
         <Label htmlFor="line-search">Find a line</Label>
@@ -64,7 +67,7 @@ export function LinesPage() {
           id="line-search"
           type="search"
           className="mt-1.5 bg-card"
-          placeholder="Red Line, 39, Fitchburg"
+          placeholder={regionSearchExample(region.slug)}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
@@ -76,13 +79,13 @@ export function LinesPage() {
         ) : routes.isError ? (
           <ErrorPanel what="the list of lines" error={routes.error} onRetry={() => void routes.refetch()} />
         ) : routes.data.length === 0 ? (
-          <EmptyPanel title="The MBTA timetable has not been loaded yet.">
+          <EmptyPanel title={`The ${region.operator} timetable has not been loaded yet.`}>
             Load it with <code className="font-mono">uv run python -m app.gtfs.static_loader</code> or start
             the background worker.
           </EmptyPanel>
         ) : groups.length === 0 ? (
           <EmptyPanel title={`No line matches "${search.trim()}".`}>
-            Try a route number such as 39, or part of a line name such as Orange.
+            Try a route number or part of a line name, for example {regionSearchExample(region.slug)}.
           </EmptyPanel>
         ) : (
           groups.map((group) => (
@@ -99,9 +102,9 @@ export function LinesPage() {
               </SectionTitle>
               <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {group.routes.map((route) => (
-                  <li key={route.route_id}>
+                  <li key={routeKey(route.agency, route.route_id)}>
                     <Link
-                      to={`/lines/${encodeURIComponent(route.route_id)}`}
+                      to={linePath(region.slug, route.agency, route.route_id)}
                       className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2.5 hover:border-foreground"
                     >
                       <RouteBadge route={route} routeId={route.route_id} />

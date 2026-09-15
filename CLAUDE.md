@@ -1,8 +1,8 @@
 # Urban Public Transit Reliability & Delay Monitor
 
-Portfolio project. Polls MBTA GTFS-Realtime feeds (vehicle positions and trip updates), matches them against the static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
+Portfolio project. Polls GTFS-Realtime feeds (vehicle positions and trip updates) for two regions, Boston (MBTA) and Los Angeles (LA Metro bus and rail), matches them against each agency's static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Status:** milestones M0 through M5 are done, plus the Linecheck website in `web/`. Open items are listed under "Open items" in docs/DESIGN.md. Milestones M0–M5 are listed in docs/DESIGN.md.
+**Status:** milestones M0 through M5 are done, plus the Linecheck website in `web/` and multi-agency support (Los Angeles). LA Metro live feeds need `LA_METRO_API_KEY` in `.env` (the owner adds it; never paste or commit the key). Open items are listed under "Open items" in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
@@ -21,8 +21,8 @@ uv run alembic upgrade head                      # apply migrations
 uv run alembic revision --autogenerate -m "msg"  # new migration
 uv run uvicorn app.api.main:app --reload         # API on :8000
 uv run python -m app.worker.scheduler            # background jobs
-uv run python -m app.gtfs.static_loader          # load MBTA static GTFS now (--file PATH, --force)
-uv run python -m app.pipeline.aggregate --hours 48  # rebuild hourly performance for recent hours
+uv run python -m app.gtfs.static_loader          # load every agency's static GTFS now (--agency SLUG, --file PATH, --force)
+uv run python -m app.pipeline.aggregate --hours 48  # rebuild hourly performance for recent hours (--agency SLUG)
 uv run pytest                                    # all tests
 uv run ruff check . && uv run mypy app           # lint + types
 
@@ -34,26 +34,30 @@ docker compose up --build                        # everything; website on :8080,
 
 ## Layout
 ```
-app/core/config.py     settings from env (feed URLs, on-time window, retention days)
-app/core/job_health.py rules for when a job counts as ok, failing, stale, or never_run (/health)
+app/core/config.py     settings from env (enabled regions, feed URLs, LA Metro API key, on-time window, retention days)
+app/core/agencies.py   the agency and region registry (mbta; lametro-bus, lametro-rail) built from settings
+app/core/job_health.py rules for when a job counts as ok, failing, stale, never_run, or not_configured (/health)
 app/db/                models.py, session.py, partitions.py (daily vehicle_positions partitions)
 app/gtfs/              static_loader.py (GTFS zip), realtime.py (fetch + protobuf decode), realtime_ingest.py (poll_once)
 app/metrics/           delay.py, arrivals.py, headway.py, aggregate.py (pure functions)
 app/pipeline/          stop_events.py, aggregate.py, retention.py (database orchestration for derived tables)
 app/worker/            scheduler.py, jobs.py (load_static_gtfs, poll_realtime, derive_stop_events, aggregate_hourly, retention)
-app/api/               main.py, routers/, schemas/
+app/api/               main.py, dependencies.py (require_agency, require_region), routers/, schemas/
 alembic/               migrations
-tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots)
-web/src/pages/         one component per page (Home, Lines, LineLive, LineHistory, Rankings, Status, Methodology, Privacy, Terms, NotFound)
-web/src/components/    shared pieces (layout, common, WeeklyGrid, VehicleMap, LineHeader); ui/ holds shadcn/ui primitives
-web/src/lib/           api.ts (types + fetch), queries.ts (TanStack Query hooks), format.ts, grid.ts, site.ts
+tests/unit, tests/integration, tests/fixtures/*.pb (recorded feed snapshots); tests/agencies.py looks up agencies
+web/src/router.tsx     addresses: /, /status, /how-it-works, /privacy, /terms, and /:region/(lines|rankings), /:region/lines/:agency/:routeId(/history)
+web/src/pages/         one component per page (Home, RegionHome, Lines, LineLive, LineHistory, Rankings, Status, Methodology, Privacy, Terms, NotFound)
+web/src/components/    shared pieces (layout/SiteLayout with city switcher, layout/RegionLayout, common, WeeklyGrid, VehicleMap, LineHeader); ui/ holds shadcn/ui primitives
+web/src/lib/           api.ts (types + fetch), queries.ts (TanStack Query hooks), regions.ts (useRegion, linePath), format.ts, grid.ts, site.ts
 web/nginx.conf         production routing: /api and /health to the api container, everything else to index.html
 ```
 
 ## Domain rules
 - GTFS ids (`route_id`, `trip_id`, `stop_id`, `vehicle_id`) are **text**, never integers.
+- Agencies: every table has an `agency` slug first in its primary key, and ids are only unique within an agency. Every query, upsert, delete, and API lookup must filter or key on agency. A region (`boston`, `los-angeles`) is what the website shows as a city and holds one or more agencies; API paths use `/regions/{region}` for city-wide views and `/agencies/{agency}/routes/{route_id}` for one route.
 - Schedule times are seconds after "noon minus 12h" on `service_date`, and can exceed 86400 (e.g. 25:10:00). Always carry `service_date` with them.
-- Local computations use `America/New_York`. Every stored timestamp is `timestamptz` in UTC.
+- Local computations use the agency's own time zone (`Agency.timezone`: `America/New_York` for the MBTA, `America/Los_Angeles` for LA Metro); the global `TIMEZONE` setting is only for jobs that are not per agency. Every stored timestamp is `timestamptz` in UTC.
+- An agency whose feeds need a key (LA Metro) only gets live jobs scheduled when the key is set; without it `/health` reports those jobs as `not_configured` (not a failure) and API responses carry `realtime_configured: false`.
 - MBTA feeds usually omit `delay`. Delay = observed or predicted arrival − scheduled arrival, matched on `trip_id` + `stop_sequence`.
 - On-time window comes from config (default −60s to +300s). Never hardcode it.
 - Frequent routes (scheduled headway ≤ 15 min) are also judged on headway adherence and excess wait time.
@@ -70,12 +74,12 @@ web/nginx.conf         production routing: /api and /health to the api container
 - Database lookups by many keys at once must pass the keys as arrays and join with `unnest`, never as a literal `(a, b) IN ((...), ...)` list: at full daytime service those lists reach thousands of entries and Postgres fails with "stack depth limit exceeded".
 - Metric logic lives in `app/metrics` as pure functions with unit tests. No DB or network calls there.
 - All DB writes are idempotent: `INSERT ... ON CONFLICT` on each table's unique key, or (for recomputed aggregates) delete and rewrite a time window inside one transaction. Jobs must be safe to re-run.
-- Every worker job takes a Postgres advisory lock and logs to `ingest_runs`.
+- Every worker job takes a Postgres advisory lock (named `job_id(job, agency)`, e.g. `poll_realtime:mbta`) and logs to `ingest_runs` with its agency.
 - `vehicle_positions` is range-partitioned by UTC day (`vehicle_positions_pYYYYMMDD`). The poller and the retention job create partitions (`app/db/partitions.py`), the retention job drops expired ones, and Alembic ignores them. Never `DELETE` rows from it.
 - Retention (daily job, all config-driven): vehicle_positions 14 days, stop_events 90 days, route_hourly_performance 400 days (so a full-year `/historical` range still has data), ingest_runs 30 days, vehicle_latest 24 hours. Other tables are deleted from in small batches, each in its own transaction.
-- A new scheduled job must be added to `JOB_NAMES` and `job_max_ages` in `app/core/job_health.py`, or `/health` will not report it (a unit test checks this).
+- A new scheduled job must be added to `expected_jobs` and `job_max_ages` in `app/core/job_health.py`, or `/health` will not report it (a unit test checks that scheduled jobs match `expected_jobs`).
 - Schema changes go only through Alembic migrations.
-- Tests never hit live MBTA endpoints. Use `tests/fixtures`.
+- Tests never hit live agency endpoints. Use `tests/fixtures`. To test agency separation, load the same fixture as two agencies (`loaded_feed` and `loaded_la_rail_feed`).
 - API routes are versioned under `/api/v1`. Responses use Pydantic schemas from `app/api/schemas`.
 
 ## Frontend and content rules (any website, dashboard, or docs page)

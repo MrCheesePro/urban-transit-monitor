@@ -21,7 +21,6 @@ import {
 } from '@/components/ui/select'
 import { WeeklyGrid } from '@/components/WeeklyGrid'
 import {
-  bostonToday,
   describeDelay,
   formatCount,
   formatCv,
@@ -30,9 +29,11 @@ import {
   readableDate,
   routeName,
   shiftDate,
+  todayIn,
 } from '@/lib/format'
 import type { GridMetric } from '@/lib/grid'
-import { useHistoricalRoute, useRoutes } from '@/lib/queries'
+import { useHistoricalRoute, useRegionRoutes } from '@/lib/queries'
+import { useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
 type PeriodChoice = '7' | '30' | '90'
@@ -45,29 +46,32 @@ const GRID_METRICS: { value: GridMetric; label: string }[] = [
 ]
 
 // A line's history page: its on-time record over a chosen period as a weekly timetable grid (one
-// cell per day of week and hour), with totals for the whole period above it.
+// cell per day of week and hour, in the city's local time), with totals for the whole period above.
 export function LineHistoryPage() {
-  const { routeId = '' } = useParams()
-  const routes = useRoutes()
-  const route = routes.data?.find((candidate) => candidate.route_id === routeId)
+  const region = useRegion()
+  const { agency = '', routeId = '' } = useParams()
+  const routes = useRegionRoutes(region.slug)
+  const route = routes.data?.find(
+    (candidate) => candidate.agency === agency && candidate.route_id === routeId,
+  )
   const [period, setPeriod] = useState<PeriodChoice>('30')
   const [direction, setDirection] = useState<DirectionChoice>('both')
   const [metric, setMetric] = useState<GridMetric>('on_time')
-  const endDate = bostonToday()
+  const endDate = todayIn(region.timezone)
   const startDate = shiftDate(endDate, -(Number(period) - 1))
-  const history = useHistoricalRoute(routeId, {
+  const history = useHistoricalRoute(agency, routeId, {
     startDate,
     endDate,
     directionId: direction === 'both' ? undefined : Number(direction),
   })
   useDocumentTitle(route ? `${routeName(route)} history` : 'Line history')
 
-  if (routes.data && !route) return <LineNotFound routeId={routeId} />
+  if (routes.data && !route) return <LineNotFound region={region} routeId={routeId} />
   const summary = history.data?.summary
 
   return (
     <Container>
-      <LineHeader route={route} routeId={routeId} />
+      <LineHeader region={region} agency={agency} route={route} routeId={routeId} />
 
       <div className="mt-6 flex flex-wrap items-end gap-4">
         <div className="w-44">
@@ -98,7 +102,7 @@ export function LineHistoryPage() {
         </div>
       </div>
       <p className="mt-3 text-sm text-muted-foreground">
-        {readableDate(startDate)} to {readableDate(endDate)}, Boston time.
+        {readableDate(startDate)} to {readableDate(endDate)}, {region.name} time.
       </p>
 
       <div className="mt-6">
@@ -108,8 +112,9 @@ export function LineHistoryPage() {
           <ErrorPanel what="this line's history" error={history.error} onRetry={() => void history.refetch()} />
         ) : summary && summary.sample_count === 0 && summary.headway_sample_count === 0 ? (
           <EmptyPanel title="No arrivals recorded for this line in this period yet.">
-            Hourly statistics appear once the background worker has run for at least an hour while the line
-            is in service.
+            {region.realtime_configured
+              ? 'Hourly statistics appear once the background worker has run for at least an hour while the line is in service.'
+              : `Hourly statistics need live ${region.operator} data, which is not connected yet.`}
           </EmptyPanel>
         ) : (
           <>
@@ -157,7 +162,7 @@ export function LineHistoryPage() {
                 />
               </div>
               <div className="mt-4">
-                <WeeklyGrid cells={history.data.cells} metric={metric} />
+                <WeeklyGrid cells={history.data.cells} metric={metric} cityName={region.name} />
               </div>
             </section>
           </>

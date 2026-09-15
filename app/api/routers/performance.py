@@ -1,30 +1,38 @@
 import datetime as dt
+from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_region
 from app.api.schemas.performance import RankedRouteOut, RankingsOut
+from app.core.agencies import Region
 from app.core.config import get_settings
 from app.db.models import Route, RouteHourlyPerformance
 from app.db.session import get_session
 from app.metrics.aggregate import RankingMetric, RouteTotals, hour_bucket, rank_routes
 
-router = APIRouter(prefix="/api/v1/performance", tags=["performance"])
+router = APIRouter(prefix="/api/v1/regions", tags=["regions"])
 
 MAX_RANKING_DAYS = 90
 
 
-# Sum each route's hourly figures over [start, end), weighting every figure by the samples behind
-# it, optionally for one route_type only. The database only adds numbers up; turning the sums into
-# averages and ranking happens in app/metrics/aggregate.py.
+# Sum each route's hourly figures over [start, end) for the given agencies, weighting every figure
+# by the samples behind it, optionally for one route_type only. The database only adds numbers up;
+# turning the sums into averages and ranking happens in app/metrics/aggregate.py.
 def _route_totals(
-    session: Session, start: dt.datetime, end: dt.datetime, route_type: int | None
+    session: Session,
+    agencies: Sequence[str],
+    start: dt.datetime,
+    end: dt.datetime,
+    route_type: int | None,
 ) -> list[RouteTotals]:
     hourly = RouteHourlyPerformance
     statement = (
         select(
+            hourly.agency,
             hourly.route_id,
             func.sum(hourly.sample_count).label("sample_count"),
             func.sum(hourly.headway_sample_count).label("headway_sample_count"),
@@ -36,15 +44,16 @@ def _route_totals(
                 case((hourly.headway_cv.is_not(None), hourly.headway_sample_count), else_=0)
             ).label("headway_cv_weight"),
         )
-        .where(hourly.hour_bucket >= start, hourly.hour_bucket < end)
-        .group_by(hourly.route_id)
+        .where(hourly.agency.in_(agencies), hourly.hour_bucket >= start, hourly.hour_bucket < end)
+        .group_by(hourly.agency, hourly.route_id)
     )
     if route_type is not None:
-        statement = statement.join(Route, Route.route_id == hourly.route_id).where(
-            Route.route_type == route_type
-        )
+        statement = statement.join(
+            Route, and_(Route.agency == hourly.agency, Route.route_id == hourly.route_id)
+        ).where(Route.route_type == route_type)
     return [
         RouteTotals(
+            agency=row.agency,
             route_id=row.route_id,
             sample_count=int(row.sample_count or 0),
             headway_sample_count=int(row.headway_sample_count or 0),
@@ -58,15 +67,17 @@ def _route_totals(
     ]
 
 
-# GET /api/v1/performance/rankings: rank routes from most to least reliable over the last `days`
-# days of complete hours (default 30), with both directions combined.
+# GET /api/v1/regions/{region}/rankings: rank one city's routes (every agency in the region
+# together) from most to least reliable over the last `days` days of complete hours (default 30),
+# with both directions combined.
 # - metric=on_time (default): highest on-time percentage first.
 # - metric=delay: smallest average absolute delay first.
 # - metric=headway: most evenly spaced service (lowest headway CV) first.
 # Routes with fewer than min_samples samples (default RANKING_MIN_SAMPLES) are left out and counted
 # in excluded_routes. Optional ?route_type= limits the ranking to one mode; ?limit= caps the list.
-@router.get("/rankings", response_model=RankingsOut)
+@router.get("/{region}/rankings", response_model=RankingsOut)
 def rankings(
+    region: Annotated[Region, Depends(require_region)],
     session: Annotated[Session, Depends(get_session)],
     metric: Annotated[RankingMetric, Query(description="on_time, delay, or headway")] = "on_time",
     days: Annotated[int, Query(ge=1, le=MAX_RANKING_DAYS)] = 30,
@@ -79,40 +90,31 @@ def rankings(
     period_end = hour_bucket(dt.datetime.now(dt.UTC))
     period_start = period_end - dt.timedelta(days=days)
 
-    ranked, excluded = rank_routes(
-        _route_totals(session, period_start, period_end, route_type), metric, threshold
-    )
+    totals = _route_totals(session, region.agency_slugs, period_start, period_end, route_type)
+    ranked, excluded = rank_routes(totals, metric, threshold)
     if limit is not None:
         ranked = ranked[:limit]
-    route_ids = [route.route_id for route in ranked]
-    routes = (
-        {
-            route.route_id: route
-            for route in session.scalars(select(Route).where(Route.route_id.in_(route_ids)))
-        }
-        if route_ids
-        else {}
-    )
+    routes: dict[tuple[str, str], Route] = {}
+    if ranked:
+        candidates = session.scalars(
+            select(Route).where(
+                Route.agency.in_(region.agency_slugs),
+                Route.route_id.in_({item.route_id for item in ranked}),
+            )
+        )
+        routes = {(route.agency, route.route_id): route for route in candidates}
 
-    return RankingsOut(
-        metric=metric,
-        days=days,
-        min_samples=threshold,
-        route_type=route_type,
-        period_start=period_start,
-        period_end=period_end,
-        excluded_routes=excluded,
-        routes=[
+    items = []
+    for item in ranked:
+        route = routes.get((item.agency, item.route_id))
+        items.append(
             RankedRouteOut(
                 rank=item.rank,
+                agency=item.agency,
                 route_id=item.route_id,
-                route_short_name=routes[item.route_id].route_short_name
-                if item.route_id in routes
-                else None,
-                route_long_name=routes[item.route_id].route_long_name
-                if item.route_id in routes
-                else None,
-                route_type=routes[item.route_id].route_type if item.route_id in routes else None,
+                route_short_name=route.route_short_name if route else None,
+                route_long_name=route.route_long_name if route else None,
+                route_type=route.route_type if route else None,
                 sample_count=item.sample_count,
                 headway_sample_count=item.headway_sample_count,
                 on_time_percentage=item.on_time_percentage,
@@ -120,6 +122,16 @@ def rankings(
                 avg_abs_delay_seconds=item.avg_abs_delay_seconds,
                 headway_cv=item.headway_cv,
             )
-            for item in ranked
-        ],
+        )
+
+    return RankingsOut(
+        region=region.slug,
+        metric=metric,
+        days=days,
+        min_samples=threshold,
+        route_type=route_type,
+        period_start=period_start,
+        period_end=period_end,
+        excluded_routes=excluded,
+        routes=items,
     )

@@ -76,9 +76,16 @@ def hourly(
 
 # RouteTotals for a route from its averages, the way the rankings query would sum them.
 def totals(
-    route: str, samples: int, on_time: float, abs_delay: float, cv: float | None, headways: int
+    route: str,
+    samples: int,
+    on_time: float,
+    abs_delay: float,
+    cv: float | None,
+    headways: int,
+    agency: str = "mbta",
 ) -> RouteTotals:
     return RouteTotals(
+        agency=agency,
         route_id=route,
         sample_count=samples,
         headway_sample_count=headways,
@@ -237,3 +244,20 @@ def test_rank_ties() -> None:
         min_samples=1,
     )
     assert [r.route_id for r in ranked] == ["C", "A", "B"]
+
+
+# The same route id can be ranked for two agencies; each keeps its own agency, and ties between them
+# are broken by agency name.
+def test_rank_same_route_id_in_two_agencies() -> None:
+    ranked, _ = rank_routes(
+        [
+            totals("Red", 300, 90.0, 10.0, None, 0, agency="mbta"),
+            totals("Red", 300, 90.0, 10.0, None, 0, agency="lametro-rail"),
+        ],
+        "on_time",
+        min_samples=1,
+    )
+    assert [(r.rank, r.agency, r.route_id) for r in ranked] == [
+        (1, "lametro-rail", "Red"),
+        (2, "mbta", "Red"),
+    ]

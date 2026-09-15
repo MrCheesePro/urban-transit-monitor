@@ -18,6 +18,8 @@ class ModeSummaryOut(BaseModel):
 
 # Response body for GET /api/v1/system/live: every vehicle heard from recently, network-wide.
 class SystemLiveOut(BaseModel):
+    region: str
+    realtime_configured: bool
     as_of: dt.datetime | None
     data_age_seconds: int | None
     stale: bool

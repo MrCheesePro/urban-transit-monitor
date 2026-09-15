@@ -56,6 +56,7 @@ def test_old_rows_deleted(engine: Engine) -> None:
             insert(StopEvent),
             [
                 {
+                    "agency": "mbta",
                     "trip_id": f"t{age}",
                     "service_date": days_ago(age).date(),
                     "stop_sequence": 1,
@@ -71,6 +72,7 @@ def test_old_rows_deleted(engine: Engine) -> None:
             insert(RouteHourlyPerformance),
             [
                 {
+                    "agency": "mbta",
                     "route_id": "Red",
                     "direction_id": 0,
                     "hour_bucket": days_ago(age).replace(minute=0),
@@ -91,7 +93,10 @@ def test_old_rows_deleted(engine: Engine) -> None:
         )
         conn.execute(
             insert(VehicleLatest),
-            [{"vehicle_id": f"v{age}", "feed_timestamp": days_ago(age)} for age in (2, 1 / 24)],
+            [
+                {"agency": "mbta", "vehicle_id": f"v{age}", "feed_timestamp": days_ago(age)}
+                for age in (2, 1 / 24)
+            ],
         )
 
     settings = get_settings().model_copy(update={"retention_batch_size": 2})

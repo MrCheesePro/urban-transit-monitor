@@ -4,8 +4,6 @@ import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-le
 import type { LiveVehicle } from '@/lib/api'
 import { SEVERITY_HEX, SEVERITY_LABELS, signedDelay } from '@/lib/format'
 
-const BOSTON_CENTER: [number, number] = [42.3601, -71.0589]
-
 // Move the map so every vehicle is in view. It only re-fits when `fitKey` changes (a different
 // route or direction), so the 30-second refresh never undoes the reader's own zooming.
 function FitToVehicles({ points, fitKey }: { points: [number, number][]; fitKey: string }) {
@@ -23,8 +21,17 @@ function FitToVehicles({ points, fitKey }: { points: [number, number][]; fitKey:
 
 // A map of the vehicles on a route, one dot per vehicle colored by its delay severity, with the
 // vehicle number and delay on hover or focus. Map tiles come from OpenStreetMap. Scroll-wheel zoom
-// is off so scrolling down the page never gets captured by the map.
-export function VehicleMap({ vehicles, fitKey }: { vehicles: LiveVehicle[]; fitKey: string }) {
+// is off so scrolling down the page never gets captured by the map. `center` is the city's center,
+// used only until the map has fitted itself to the vehicles.
+export function VehicleMap({
+  vehicles,
+  fitKey,
+  center,
+}: {
+  vehicles: LiveVehicle[]
+  fitKey: string
+  center: [number, number]
+}) {
   const placed = vehicles.filter(
     (vehicle): vehicle is LiveVehicle & { lat: number; lon: number } =>
       vehicle.lat !== null && vehicle.lon !== null,
@@ -34,7 +41,7 @@ export function VehicleMap({ vehicles, fitKey }: { vehicles: LiveVehicle[]; fitK
   return (
     <div className="overflow-hidden rounded-md border border-border">
       <MapContainer
-        center={BOSTON_CENTER}
+        center={center}
         zoom={12}
         scrollWheelZoom={false}
         className="h-[380px] w-full"

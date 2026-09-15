@@ -1,6 +1,7 @@
 """ORM models. Import this module so tables register on Base.metadata (Alembic relies on it).
 
-See docs/DESIGN.md for how each table is used.
+Every table except ingest_runs starts its primary key with `agency` (see app/core/agencies.py), so
+the same route, trip, or stop id can exist in two agencies. See docs/DESIGN.md for each table's use.
 """
 
 import datetime as dt
@@ -10,26 +11,31 @@ from sqlalchemy import (
     Date,
     DateTime,
     Float,
-    ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
+    PrimaryKeyConstraint,
     SmallInteger,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
-# Static GTFS tables. The static loader empties and refills all of them on each new feed version.
+# Static GTFS tables. The static loader replaces one agency's rows whenever that agency publishes
+# a new timetable; other agencies' rows are left alone.
 
 
 # A transit line such as "Red" or bus "1". route_type uses GTFS codes:
 # 0 light rail, 1 subway, 2 commuter rail, 3 bus, 4 ferry.
 class Route(Base):
     __tablename__ = "routes"
+    __table_args__ = (PrimaryKeyConstraint("agency", "route_id", name="pk_routes"),)
 
-    route_id: Mapped[str] = mapped_column(primary_key=True)
+    agency: Mapped[str]
+    route_id: Mapped[str]
     agency_id: Mapped[str | None]
     route_short_name: Mapped[str | None]
     route_long_name: Mapped[str | None]
@@ -43,10 +49,21 @@ class Route(Base):
 # service_id links to calendar / calendar_dates to decide which days the trip runs.
 class Trip(Base):
     __tablename__ = "trips"
+    __table_args__ = (
+        PrimaryKeyConstraint("agency", "trip_id", name="pk_trips"),
+        ForeignKeyConstraint(
+            ["agency", "route_id"],
+            ["routes.agency", "routes.route_id"],
+            name="fk_trips_agency_route_id_routes",
+        ),
+        Index("ix_trips_agency_route_id", "agency", "route_id"),
+        Index("ix_trips_agency_service_id", "agency", "service_id"),
+    )
 
-    trip_id: Mapped[str] = mapped_column(primary_key=True)
-    route_id: Mapped[str] = mapped_column(ForeignKey("routes.route_id"), index=True)
-    service_id: Mapped[str] = mapped_column(index=True)
+    agency: Mapped[str]
+    trip_id: Mapped[str]
+    route_id: Mapped[str]
+    service_id: Mapped[str]
     direction_id: Mapped[int | None] = mapped_column(SmallInteger)
     trip_headsign: Mapped[str | None]
     shape_id: Mapped[str | None]
@@ -56,8 +73,10 @@ class Trip(Base):
 # 1 is a parent station that groups platforms (parent_station points at it).
 class Stop(Base):
     __tablename__ = "stops"
+    __table_args__ = (PrimaryKeyConstraint("agency", "stop_id", name="pk_stops"),)
 
-    stop_id: Mapped[str] = mapped_column(primary_key=True)
+    agency: Mapped[str]
+    stop_id: Mapped[str]
     stop_name: Mapped[str | None]
     lat: Mapped[float | None] = mapped_column(Float)
     lon: Mapped[float | None] = mapped_column(Float)
@@ -67,13 +86,18 @@ class Stop(Base):
 
 # The scheduled arrival and departure of one trip at one stop. Times are seconds after the start
 # of the service day and can exceed 86400 for trips that run past midnight. There is no foreign
-# key to trips on purpose: checking it for ~4 million rows would make each reload much slower.
+# key to trips on purpose: checking it for millions of rows would make each reload much slower.
 class StopTime(Base):
     __tablename__ = "stop_times"
+    __table_args__ = (
+        PrimaryKeyConstraint("agency", "trip_id", "stop_sequence", name="pk_stop_times"),
+        Index("ix_stop_times_agency_stop_id", "agency", "stop_id"),
+    )
 
-    trip_id: Mapped[str] = mapped_column(primary_key=True)
-    stop_sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
-    stop_id: Mapped[str] = mapped_column(index=True)
+    agency: Mapped[str]
+    trip_id: Mapped[str]
+    stop_sequence: Mapped[int] = mapped_column(Integer)
+    stop_id: Mapped[str]
     arrival_secs: Mapped[int | None] = mapped_column(Integer)
     departure_secs: Mapped[int | None] = mapped_column(Integer)
 
@@ -81,8 +105,10 @@ class StopTime(Base):
 # The regular weekly pattern for a service_id (which weekdays it runs, between two dates).
 class Calendar(Base):
     __tablename__ = "calendar"
+    __table_args__ = (PrimaryKeyConstraint("agency", "service_id", name="pk_calendar"),)
 
-    service_id: Mapped[str] = mapped_column(primary_key=True)
+    agency: Mapped[str]
+    service_id: Mapped[str]
     monday: Mapped[bool]
     tuesday: Mapped[bool]
     wednesday: Mapped[bool]
@@ -98,30 +124,40 @@ class Calendar(Base):
 # event), 2 removes it (e.g. a holiday). The column is named "date" as in GTFS.
 class CalendarDate(Base):
     __tablename__ = "calendar_dates"
+    __table_args__ = (
+        PrimaryKeyConstraint("agency", "service_id", "date", name="pk_calendar_dates"),
+    )
 
-    service_id: Mapped[str] = mapped_column(primary_key=True)
-    service_date: Mapped[dt.date] = mapped_column("date", Date, primary_key=True)
+    agency: Mapped[str]
+    service_id: Mapped[str]
+    service_date: Mapped[dt.date] = mapped_column("date", Date)
     exception_type: Mapped[int] = mapped_column(SmallInteger)
 
 
-# Every static feed version that has been loaded, so the daily job can skip unchanged feeds.
+# Every static feed version loaded for each agency, so the daily job can skip unchanged feeds.
 class FeedVersion(Base):
     __tablename__ = "feed_versions"
+    __table_args__ = (
+        UniqueConstraint("agency", "version", name="uq_feed_versions_agency_version"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
-    version: Mapped[str] = mapped_column(unique=True)
+    agency: Mapped[str]
+    version: Mapped[str]
     loaded_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
 
 # Operations log: one row per background job run, with its outcome, for /health and debugging.
+# agency is empty for jobs that cover every agency at once (retention).
 class IngestRun(Base):
     __tablename__ = "ingest_runs"
-    __table_args__ = (Index("ix_ingest_runs_job_started_at", "job", "started_at"),)
+    __table_args__ = (Index("ix_ingest_runs_job_agency_started_at", "job", "agency", "started_at"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     job: Mapped[str]
+    agency: Mapped[str | None]
     status: Mapped[str]
     started_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -131,7 +167,7 @@ class IngestRun(Base):
     error: Mapped[str | None]
 
 
-# Realtime tables. Filled by the poll_realtime job from the GTFS-Realtime feeds.
+# Realtime tables. Filled by the poll_realtime job from each agency's GTFS-Realtime feeds.
 
 
 # Columns shared by vehicle_positions and vehicle_latest: everything known about one vehicle at
@@ -159,23 +195,39 @@ class _VehicleSnapshotColumns:
 class VehiclePosition(_VehicleSnapshotColumns, Base):
     __tablename__ = "vehicle_positions"
     __table_args__ = (
-        Index("ix_vehicle_positions_route_id_feed_timestamp", "route_id", "feed_timestamp"),
-        Index("ix_vehicle_positions_trip_id_feed_timestamp", "trip_id", "feed_timestamp"),
+        PrimaryKeyConstraint("agency", "vehicle_id", "feed_timestamp", name="pk_vehicle_positions"),
+        Index(
+            "ix_vehicle_positions_agency_route_id_feed_timestamp",
+            "agency",
+            "route_id",
+            "feed_timestamp",
+        ),
+        Index(
+            "ix_vehicle_positions_agency_trip_id_feed_timestamp",
+            "agency",
+            "trip_id",
+            "feed_timestamp",
+        ),
         Index("ix_vehicle_positions_feed_timestamp", "feed_timestamp"),
         {"postgresql_partition_by": "RANGE (feed_timestamp)"},
     )
 
-    vehicle_id: Mapped[str] = mapped_column(primary_key=True)
-    feed_timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    agency: Mapped[str]
+    vehicle_id: Mapped[str]
+    feed_timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
 
 
 # The newest known state of each vehicle, one row per vehicle, overwritten on every poll. The live
 # API reads this small table instead of scanning the large history table.
 class VehicleLatest(_VehicleSnapshotColumns, Base):
     __tablename__ = "vehicle_latest"
+    __table_args__ = (
+        PrimaryKeyConstraint("agency", "vehicle_id", name="pk_vehicle_latest"),
+        Index("ix_vehicle_latest_agency_route_id", "agency", "route_id"),
+    )
 
-    vehicle_id: Mapped[str] = mapped_column(primary_key=True)
-    route_id: Mapped[str | None] = mapped_column(index=True)
+    agency: Mapped[str]
+    vehicle_id: Mapped[str]
     feed_timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -192,8 +244,12 @@ class VehicleLatest(_VehicleSnapshotColumns, Base):
 class StopEvent(Base):
     __tablename__ = "stop_events"
     __table_args__ = (
+        PrimaryKeyConstraint(
+            "agency", "trip_id", "service_date", "stop_sequence", name="pk_stop_events"
+        ),
         Index(
-            "ix_stop_events_route_direction_stop_arrival",
+            "ix_stop_events_agency_route_direction_stop_arrival",
+            "agency",
             "route_id",
             "direction_id",
             "stop_id",
@@ -202,9 +258,10 @@ class StopEvent(Base):
         Index("ix_stop_events_observed_arrival", "observed_arrival"),
     )
 
-    trip_id: Mapped[str] = mapped_column(primary_key=True)
-    service_date: Mapped[dt.date] = mapped_column(Date, primary_key=True)
-    stop_sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agency: Mapped[str]
+    trip_id: Mapped[str]
+    service_date: Mapped[dt.date] = mapped_column(Date)
+    stop_sequence: Mapped[int] = mapped_column(Integer)
     route_id: Mapped[str]
     direction_id: Mapped[int | None] = mapped_column(SmallInteger)
     stop_id: Mapped[str]
@@ -221,14 +278,20 @@ class StopEvent(Base):
 
 # Reliability of one route in one direction during one UTC hour, rebuilt by the aggregate_hourly
 # job from stop_events. day_of_week (0 = Monday) and hour_of_day are the bucket's local time in the
-# agency timezone. See app/metrics/aggregate.py for how each figure is computed.
+# agency's timezone. See app/metrics/aggregate.py for how each figure is computed.
 class RouteHourlyPerformance(Base):
     __tablename__ = "route_hourly_performance"
-    __table_args__ = (Index("ix_route_hourly_performance_hour_bucket", "hour_bucket"),)
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "agency", "route_id", "direction_id", "hour_bucket", name="pk_route_hourly_performance"
+        ),
+        Index("ix_route_hourly_performance_hour_bucket", "hour_bucket"),
+    )
 
-    route_id: Mapped[str] = mapped_column(primary_key=True)
-    direction_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
-    hour_bucket: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    agency: Mapped[str]
+    route_id: Mapped[str]
+    direction_id: Mapped[int] = mapped_column(SmallInteger)
+    hour_bucket: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     day_of_week: Mapped[int] = mapped_column(SmallInteger)
     hour_of_day: Mapped[int] = mapped_column(SmallInteger)
     sample_count: Mapped[int] = mapped_column(Integer)
@@ -246,12 +309,14 @@ class RouteHourlyPerformance(Base):
     )
 
 
-# Last snapshot seen from each realtime feed ("vehicle_positions", "trip_updates"). Used to skip a
-# poll when the agency has not published anything new, and to report how old the live data is.
+# Last snapshot seen from each agency's realtime feeds ("vehicle_positions", "trip_updates"). Used
+# to skip a poll when the agency has not published anything new, and to report data age.
 class RealtimeFeedState(Base):
     __tablename__ = "realtime_feed_state"
+    __table_args__ = (PrimaryKeyConstraint("agency", "feed", name="pk_realtime_feed_state"),)
 
-    feed: Mapped[str] = mapped_column(primary_key=True)
+    agency: Mapped[str]
+    feed: Mapped[str]
     header_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     entity_count: Mapped[int] = mapped_column(Integer)
     fetched_at: Mapped[dt.datetime] = mapped_column(

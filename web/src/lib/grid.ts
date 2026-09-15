@@ -57,7 +57,7 @@ export const GRID_SCALES: Record<GridMetric, GridScale> = {
   },
 }
 
-// Short hour label for the grid header in Boston time: "12a", "6a", "12p", "9p".
+// Short hour label for the grid header, in the city's local time: "12a", "6a", "12p", "9p".
 export function hourLabel(hour: number): string {
   const twelveHour = hour % 12 === 0 ? 12 : hour % 12
   return `${twelveHour}${hour < 12 ? 'a' : 'p'}`

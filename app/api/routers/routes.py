@@ -5,13 +5,14 @@ from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import require_agency
 from app.api.freshness import vehicle_feed_freshness
 from app.api.schemas.live import LiveRouteOut, LiveSummaryOut, LiveVehicleOut
 from app.api.schemas.performance import HistoricalCellOut, HistoricalRouteOut, PerformanceOut
-from app.api.schemas.routes import RouteOut
+from app.core.agencies import Agency
 from app.core.config import get_settings
 from app.db.models import Route, RouteHourlyPerformance, Stop, VehicleLatest
 from app.db.session import get_session
@@ -20,45 +21,47 @@ from app.metrics.delay import classify_severity, severity_thresholds, summarize_
 
 MAX_HISTORICAL_DAYS = 366
 
-router = APIRouter(prefix="/api/v1/routes", tags=["routes"])
+router = APIRouter(prefix="/api/v1/agencies/{agency}/routes", tags=["routes"])
 
 
-# GET /api/v1/routes: list every route in the loaded schedule, in the agency's own display order
-# (route_sort_order), with route_id as a tiebreaker. The optional ?route_type= filter narrows
-# the list to one mode (0 light rail, 1 subway, 2 commuter rail, 3 bus, 4 ferry).
-@router.get("", response_model=list[RouteOut])
-def list_routes(
-    session: Annotated[Session, Depends(get_session)],
-    route_type: Annotated[int | None, Query(ge=0, description="GTFS route_type code")] = None,
-) -> list[RouteOut]:
-    statement = select(Route).order_by(Route.route_sort_order.asc().nulls_last(), Route.route_id)
-    if route_type is not None:
-        statement = statement.where(Route.route_type == route_type)
-    return [RouteOut.model_validate(route) for route in session.scalars(statement)]
+# Look up one route of an agency, or answer 404 when the agency has no route with that id.
+def _require_route(session: Session, agency: Agency, route_id: str) -> Route:
+    route = session.get(Route, (agency.slug, route_id))
+    if route is None:
+        raise HTTPException(
+            status_code=404, detail=f"route {route_id!r} not found for agency {agency.slug!r}"
+        )
+    return route
 
 
-# GET /api/v1/routes/{route_id}/live: the vehicles currently on a route, each with its estimated
-# delay and severity, plus a route-level summary. Vehicles not heard from within
-# LIVE_VEHICLE_MAX_AGE_SECONDS are left out (they have usually finished their trip).
-# Optional ?direction_id=0 or 1 limits the result to one direction. Unknown routes return 404.
+# GET /api/v1/agencies/{agency}/routes/{route_id}/live: the vehicles currently on a route, each
+# with its estimated delay, severity, and the name of the stop it is at or heading to, plus a
+# route-level summary. Vehicles not heard from within LIVE_VEHICLE_MAX_AGE_SECONDS are left out.
+# realtime_configured is false for agencies whose live feeds still need an API key; then there are
+# no vehicles to show. Optional ?direction_id=0 or 1 limits the result to one direction.
 @router.get("/{route_id}/live", response_model=LiveRouteOut)
 def live_route(
     route_id: str,
+    agency: Annotated[Agency, Depends(require_agency)],
     session: Annotated[Session, Depends(get_session)],
     direction_id: Annotated[int | None, Query(ge=0, le=1, description="0 or 1")] = None,
 ) -> LiveRouteOut:
-    route = session.get(Route, route_id)
-    if route is None:
-        raise HTTPException(status_code=404, detail=f"route {route_id!r} not found")
-
+    route = _require_route(session, agency, route_id)
     settings = get_settings()
     now = dt.datetime.now(dt.UTC)
     cutoff = now - dt.timedelta(seconds=settings.live_vehicle_max_age_seconds)
+
     # Each vehicle with the name of the stop it is at or heading to (None if the stop is unknown).
     statement = (
         select(VehicleLatest, Stop.stop_name)
-        .outerjoin(Stop, Stop.stop_id == VehicleLatest.stop_id)
-        .where(VehicleLatest.route_id == route_id, VehicleLatest.feed_timestamp >= cutoff)
+        .outerjoin(
+            Stop, and_(Stop.agency == VehicleLatest.agency, Stop.stop_id == VehicleLatest.stop_id)
+        )
+        .where(
+            VehicleLatest.agency == agency.slug,
+            VehicleLatest.route_id == route_id,
+            VehicleLatest.feed_timestamp >= cutoff,
+        )
         .order_by(VehicleLatest.direction_id, VehicleLatest.vehicle_id)
     )
     if direction_id is not None:
@@ -66,15 +69,17 @@ def live_route(
     rows = session.execute(statement).all()
     vehicles = [vehicle for vehicle, _ in rows]
 
-    freshness = vehicle_feed_freshness(session, settings, now)
+    freshness = vehicle_feed_freshness(session, settings, [agency.slug], now)
     thresholds = severity_thresholds(settings)
     summary = summarize_fleet([vehicle.delay_seconds for vehicle in vehicles], thresholds)
 
     return LiveRouteOut(
+        agency=agency.slug,
         route_id=route.route_id,
         route_short_name=route.route_short_name,
         route_long_name=route.route_long_name,
         route_type=route.route_type,
+        realtime_configured=agency.realtime_enabled,
         as_of=freshness.as_of,
         data_age_seconds=freshness.data_age_seconds,
         stale=freshness.stale,
@@ -110,15 +115,16 @@ def _hourly_from_row(row: RouteHourlyPerformance) -> HourlyPerformance:
     )
 
 
-# GET /api/v1/routes/{route_id}/historical: average reliability by local day of week and hour of
-# day, for use as a weekly heatmap. start_date and end_date are inclusive dates in the agency
-# timezone; by default the last HISTORICAL_DEFAULT_DAYS days ending today. The response always has
-# all 168 cells (Monday 00:00 first), with sample_count 0 and nulls where there was no data, plus a
-# summary for the whole period. Optional ?direction_id= keeps one direction; otherwise both are
-# combined. Returns 404 for unknown routes and 422 for reversed or over-long date ranges.
+# GET /api/v1/agencies/{agency}/routes/{route_id}/historical: average reliability by local day of
+# week and hour of day, for use as a weekly heatmap. start_date and end_date are inclusive dates in
+# the agency's timezone; by default the last HISTORICAL_DEFAULT_DAYS days ending today. The response
+# always has all 168 cells (Monday 00:00 first), with sample_count 0 and nulls where there was no
+# data, plus a summary for the whole period. Optional ?direction_id= keeps one direction; otherwise
+# both are combined. Returns 404 for unknown routes and 422 for reversed or over-long date ranges.
 @router.get("/{route_id}/historical", response_model=HistoricalRouteOut)
 def historical_route(
     route_id: str,
+    agency: Annotated[Agency, Depends(require_agency)],
     session: Annotated[Session, Depends(get_session)],
     direction_id: Annotated[
         int | None, Query(ge=0, le=1, description="0 or 1; omit for both")
@@ -126,12 +132,9 @@ def historical_route(
     start_date: Annotated[dt.date | None, Query(description="first local date, inclusive")] = None,
     end_date: Annotated[dt.date | None, Query(description="last local date, inclusive")] = None,
 ) -> HistoricalRouteOut:
-    route = session.get(Route, route_id)
-    if route is None:
-        raise HTTPException(status_code=404, detail=f"route {route_id!r} not found")
-
+    route = _require_route(session, agency, route_id)
     settings = get_settings()
-    timezone = ZoneInfo(settings.timezone)
+    timezone = ZoneInfo(agency.timezone)
     last_day = end_date or dt.datetime.now(timezone).date()
     first_day = start_date or last_day - dt.timedelta(days=settings.historical_default_days - 1)
     if first_day > last_day:
@@ -144,6 +147,7 @@ def historical_route(
     period_start = dt.datetime.combine(first_day, dt.time(), tzinfo=timezone)
     period_end = dt.datetime.combine(last_day + dt.timedelta(days=1), dt.time(), tzinfo=timezone)
     statement = select(RouteHourlyPerformance).where(
+        RouteHourlyPerformance.agency == agency.slug,
         RouteHourlyPerformance.route_id == route_id,
         RouteHourlyPerformance.hour_bucket >= period_start,
         RouteHourlyPerformance.hour_bucket < period_end,
@@ -157,6 +161,7 @@ def historical_route(
         by_cell[(hour.day_of_week, hour.hour_of_day)].append(hour)
 
     return HistoricalRouteOut(
+        agency=agency.slug,
         route_id=route.route_id,
         route_short_name=route.route_short_name,
         route_long_name=route.route_long_name,
@@ -164,7 +169,7 @@ def historical_route(
         direction_id=direction_id,
         start_date=first_day,
         end_date=last_day,
-        timezone=settings.timezone,
+        timezone=agency.timezone,
         summary=PerformanceOut(**asdict(combine_hours(hours))),
         cells=[
             HistoricalCellOut(

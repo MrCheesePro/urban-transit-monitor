@@ -17,15 +17,25 @@ export function MethodologyPage() {
       <Prose>
         <h2>Where the data comes from</h2>
         <p>
-          The MBTA publishes two kinds of open data. The <strong>timetable</strong> (GTFS) lists every trip
-          and the time it is scheduled at each stop. The <strong>live feeds</strong> (GTFS-Realtime) report
-          where each vehicle is and when it is predicted to reach its upcoming stops. Linecheck reads both
-          directly from the MBTA.
+          Linecheck covers two cities: Boston, run by the MBTA, and Los Angeles, run by LA Metro. Each agency
+          publishes two kinds of data. The <strong>timetable</strong> (GTFS) lists every trip and the time it
+          is scheduled at each stop. The <strong>live feeds</strong> (GTFS-Realtime) report where each vehicle
+          is and when it is predicted to reach its upcoming stops.
+        </p>
+        <p>
+          The MBTA&apos;s timetable and live feeds are open to everyone. LA Metro publishes its buses and its
+          trains as two separate timetables, which are open, while its live feeds are served through an API
+          that needs a key. Until a key is configured, Los Angeles shows lines and timetables but no live
+          vehicles, delays, or statistics.
+        </p>
+        <p>
+          Every agency is processed on its own and in its own time zone, so hours and days for Los Angeles are
+          Pacific time and for Boston are Eastern time.
         </p>
 
         <h2>How the data is processed</h2>
         <ol>
-          <li>Once a day, the latest MBTA timetable is downloaded and stored.</li>
+          <li>Once a day, each agency&apos;s latest timetable is downloaded and stored.</li>
           <li>
             Every minute, the positions of all vehicles and their predicted arrivals are downloaded. Each
             vehicle&apos;s delay is its predicted arrival at its next stop minus that stop&apos;s scheduled time.
@@ -83,8 +93,8 @@ export function MethodologyPage() {
         <ul>
           <li>Cancelled trips are not recorded yet, so no figure counts them.</li>
           <li>
-            Trips the MBTA adds outside the timetable, which is common for subway service and shuttle buses,
-            have no scheduled times to compare against, so they get no delay estimate.
+            Trips an agency adds outside the timetable, which is common for MBTA subway service and shuttle
+            buses, have no scheduled times to compare against, so they get no delay estimate.
           </li>
           <li>Statistics only cover the time Linecheck has been collecting data.</li>
         </ul>

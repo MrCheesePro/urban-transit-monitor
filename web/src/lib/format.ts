@@ -43,8 +43,6 @@ export const SEVERITY_HEX: Record<Severity, string> = {
   unknown: '#8a918e',
 }
 
-const BOSTON_TIME_ZONE = 'America/New_York'
-
 // Name of a mode of transport from its GTFS route_type, for example 3 gives "Bus".
 export function modeName(routeType: number | null | undefined): string {
   if (routeType === null || routeType === undefined) return 'Other service'
@@ -53,24 +51,38 @@ export function modeName(routeType: number | null | undefined): string {
 
 type NamedRoute = Pick<Route, 'route_id' | 'route_short_name' | 'route_long_name' | 'route_type'>
 
-// The name riders know a route by: "Route 1" for buses, "Red Line" for rail, or the id as a
-// last resort.
-export function routeName(route: NamedRoute | undefined, fallbackId = 'Unknown route'): string {
-  if (!route) return fallbackId
-  if (route.route_type === 3 && route.route_short_name) return `Route ${route.route_short_name}`
-  return route.route_long_name || route.route_short_name || route.route_id
+// Whether a bus route's short name is a route number such as "39", "SL1", or "10/48" rather than a
+// whole name such as LA Metro's "Dodger Stadium Express".
+function isRouteNumber(shortName: string): boolean {
+  return /^[\w/-]{1,8}$/.test(shortName)
 }
 
-// Short text for a route badge, following MBTA conventions: the bus number ("39", "SL1"), the Green
-// Line branch letter ("B"), "CR" for commuter rail, "Ferry" for boats, or otherwise the first word of
-// the line's name when it is short ("Red", "Mattapan"). Never cuts a word in half.
+// The name riders know a route by: "Route 1" for numbered buses, a named bus service as it is
+// written ("Dodger Stadium Express"), "Red Line" or "Metro A Line" for rail, or the id as a last
+// resort.
+export function routeName(route: NamedRoute | undefined, fallbackId = 'Unknown route'): string {
+  if (!route) return fallbackId
+  const shortName = route.route_short_name
+  if (route.route_type === 3 && shortName) {
+    return isRouteNumber(shortName) ? `Route ${shortName}` : shortName
+  }
+  return route.route_long_name || shortName || route.route_id
+}
+
+// Short text for a route badge: the bus number ("39", "SL1", "720"), "CR" for commuter rail,
+// "Ferry" for boats, the line letter of an LA Metro line ("A" for "Metro A Line"), or otherwise the
+// first word of the line's name when it is short ("Red", "Mattapan"). Long names become initials
+// ("DSE" for "Dodger Stadium Express"). Never cuts a word in half.
 export function badgeLabel(route: NamedRoute | undefined, routeId: string): string {
-  if (route?.route_short_name) return route.route_short_name
+  const shortName = route?.route_short_name
+  if (shortName && isRouteNumber(shortName)) return shortName
   if (route?.route_type === 2) return 'CR'
   if (route?.route_type === 4) return 'Ferry'
+  const lineLetter = route?.route_long_name?.match(/^Metro (\w{1,3}) Line$/)
+  if (lineLetter) return lineLetter[1]
   const firstWord = route?.route_long_name?.split(' ')[0]
   if (firstWord && firstWord.length <= 8) return firstWord
-  const initials = (route?.route_long_name ?? routeId)
+  const initials = (shortName || route?.route_long_name || routeId)
     .split(/[\s/-]+/)
     .filter(Boolean)
     .map((word) => word[0].toUpperCase())
@@ -148,21 +160,23 @@ export function secondsSince(iso: string): number {
   return Math.round((Date.now() - new Date(iso).getTime()) / 1000)
 }
 
-// Clock time in Boston for an ISO timestamp, for example "4:12 PM".
-export function bostonTime(iso: string | null | undefined): string {
+// Clock time for an ISO timestamp in a time zone such as "America/Los_Angeles", for example
+// "4:12 PM". Without a time zone it uses the reader's own.
+export function localTime(iso: string | null | undefined, timeZone?: string): string {
   if (!iso) return 'n/a'
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: BOSTON_TIME_ZONE,
+    timeZone,
     hour: 'numeric',
     minute: '2-digit',
   }).format(new Date(iso))
 }
 
-// Date and clock time in Boston for an ISO timestamp, for example "Sep 14, 4:12 PM".
-export function bostonDateTime(iso: string | null | undefined): string {
+// Date and clock time for an ISO timestamp in a time zone, for example "Sep 14, 4:12 PM". Without a
+// time zone it uses the reader's own.
+export function localDateTime(iso: string | null | undefined, timeZone?: string): string {
   if (!iso) return 'n/a'
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: BOSTON_TIME_ZONE,
+    timeZone,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -170,9 +184,9 @@ export function bostonDateTime(iso: string | null | undefined): string {
   }).format(new Date(iso))
 }
 
-// Today's date in Boston as YYYY-MM-DD, the format the API expects for date ranges.
-export function bostonToday(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: BOSTON_TIME_ZONE }).format(new Date())
+// Today's date in a time zone as YYYY-MM-DD, the format the API expects for date ranges.
+export function todayIn(timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date())
 }
 
 // A YYYY-MM-DD date moved by a number of days (negative moves back).

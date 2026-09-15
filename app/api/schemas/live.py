@@ -39,10 +39,12 @@ class LiveSummaryOut(BaseModel):
 # Response body for GET /api/v1/routes/{route_id}/live. as_of is when MBTA generated the latest
 # vehicle snapshot; stale is true when that is too old (or missing) to trust.
 class LiveRouteOut(BaseModel):
+    agency: str
     route_id: str
     route_short_name: str | None
     route_long_name: str | None
     route_type: int
+    realtime_configured: bool
     as_of: dt.datetime | None
     data_age_seconds: int | None
     stale: bool

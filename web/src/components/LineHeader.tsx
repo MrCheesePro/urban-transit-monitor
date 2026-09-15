@@ -1,14 +1,25 @@
 import { Link, NavLink } from 'react-router-dom'
 
 import { Container, PageHeader, RouteBadge } from '@/components/common'
-import type { Route } from '@/lib/api'
+import type { Region, Route } from '@/lib/api'
 import { modeName, routeName } from '@/lib/format'
+import { agencyName, linePath } from '@/lib/regions'
 import { cn } from '@/lib/utils'
 
-// The heading shared by a line's two pages: its badge, name, and mode, plus links to switch between
-// the Live view and the History view of the same line.
-export function LineHeader({ route, routeId }: { route?: Route; routeId: string }) {
-  const base = `/lines/${encodeURIComponent(routeId)}`
+// The heading shared by a line's two pages: its badge, name, agency, and mode, plus links to switch
+// between the Live view and the History view of the same line.
+export function LineHeader({
+  region,
+  agency,
+  route,
+  routeId,
+}: {
+  region: Region
+  agency: string
+  route?: Route
+  routeId: string
+}) {
+  const base = linePath(region.slug, agency, routeId)
   const tabs = [
     { to: base, label: 'Live', end: true },
     { to: `${base}/history`, label: 'History', end: false },
@@ -18,8 +29,8 @@ export function LineHeader({ route, routeId }: { route?: Route; routeId: string 
   return (
     <PageHeader
       eyebrow={
-        <Link to="/lines" className="hover:underline hover:underline-offset-4">
-          {modeName(route?.route_type)}
+        <Link to={`/${region.slug}/lines`} className="hover:underline hover:underline-offset-4">
+          {agencyName(region, agency)} {modeName(route?.route_type).toLowerCase()}
         </Link>
       }
       title={
@@ -56,17 +67,17 @@ export function LineHeader({ route, routeId }: { route?: Route; routeId: string 
   )
 }
 
-// Shown instead of a line page when the address names a route that is not in the timetable.
-export function LineNotFound({ routeId }: { routeId: string }) {
+// Shown instead of a line page when the address names a route that is not in the city's timetables.
+export function LineNotFound({ region, routeId }: { region: Region; routeId: string }) {
   return (
     <Container>
       <PageHeader
         title="Line not found"
-        description={`There is no route with the id "${routeId}" in the MBTA timetable.`}
+        description={`There is no route with the id "${routeId}" in the ${region.operator} timetable.`}
       />
       <p className="mt-6">
-        <Link to="/lines" className="underline underline-offset-4">
-          Browse all lines
+        <Link to={`/${region.slug}/lines`} className="underline underline-offset-4">
+          Browse all {region.name} lines
         </Link>
       </p>
     </Container>

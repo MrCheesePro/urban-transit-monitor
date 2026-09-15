@@ -1,11 +1,32 @@
 // Types and fetch helpers for the Linecheck API (the FastAPI backend in app/). Field names match the
 // JSON the API returns exactly. Timestamps are ISO 8601 strings in UTC.
+//
+// A region is a city as the site shows it (Boston, Los Angeles). An agency is one timetable and set
+// of live feeds inside a region (the MBTA; LA Metro Bus and LA Metro Rail). Route ids are only unique
+// within an agency, so a route is always identified by its agency slug plus its route id.
 
 export type Severity = 'on_time' | 'early' | 'minor' | 'major' | 'severe' | 'unknown'
 export type RankingMetric = 'on_time' | 'delay' | 'headway'
-export type JobState = 'ok' | 'failing' | 'stale' | 'never_run'
+export type JobState = 'ok' | 'failing' | 'stale' | 'never_run' | 'not_configured'
+
+export interface AgencyInfo {
+  slug: string
+  name: string
+  timezone: string
+  realtime_configured: boolean
+}
+
+export interface Region {
+  slug: string
+  name: string
+  operator: string
+  timezone: string
+  realtime_configured: boolean
+  agencies: AgencyInfo[]
+}
 
 export interface Route {
+  agency: string
   route_id: string
   agency_id: string | null
   route_short_name: string | null
@@ -45,10 +66,12 @@ export interface LiveVehicle {
 }
 
 export interface LiveRoute {
+  agency: string
   route_id: string
   route_short_name: string | null
   route_long_name: string | null
   route_type: number
+  realtime_configured: boolean
   as_of: string | null
   data_age_seconds: number | null
   stale: boolean
@@ -64,7 +87,9 @@ export interface ModeSummary {
   severity: Severity
 }
 
-export interface SystemLive {
+export interface RegionLive {
+  region: string
+  realtime_configured: boolean
   as_of: string | null
   data_age_seconds: number | null
   stale: boolean
@@ -90,6 +115,7 @@ export interface HistoricalCell extends Performance {
 }
 
 export interface HistoricalRoute {
+  agency: string
   route_id: string
   route_short_name: string | null
   route_long_name: string | null
@@ -104,6 +130,7 @@ export interface HistoricalRoute {
 
 export interface RankedRoute {
   rank: number
+  agency: string
   route_id: string
   route_short_name: string | null
   route_long_name: string | null
@@ -117,6 +144,7 @@ export interface RankedRoute {
 }
 
 export interface Rankings {
+  region: string
   metric: RankingMetric
   days: number
   min_samples: number
@@ -129,6 +157,7 @@ export interface Rankings {
 
 export interface JobHealth {
   job: string
+  agency: string | null
   state: JobState
   last_status: string | null
   last_finished_at: string | null
@@ -194,6 +223,11 @@ async function getJson<T>(path: string, params?: Record<string, QueryValue>): Pr
   return (await response.json()) as T
 }
 
+// The API path of one route inside one agency.
+function routePath(agency: string, routeId: string): string {
+  return `/api/v1/agencies/${encodeURIComponent(agency)}/routes/${encodeURIComponent(routeId)}`
+}
+
 export interface HistoricalParams {
   startDate: string
   endDate: string
@@ -209,29 +243,32 @@ export interface RankingsParams {
 }
 
 export const api = {
-  // Every route in the loaded timetable, in the MBTA's display order.
-  routes: () => getJson<Route[]>('/api/v1/routes'),
+  // The cities Linecheck covers, with their agencies and whether live data is connected.
+  regions: () => getJson<Region[]>('/api/v1/regions'),
+
+  // Every route in a city's timetables, in each agency's display order.
+  regionRoutes: (region: string) =>
+    getJson<Route[]>(`/api/v1/regions/${encodeURIComponent(region)}/routes`),
 
   // Vehicles currently on one route, optionally in one direction.
-  liveRoute: (routeId: string, directionId?: number) =>
-    getJson<LiveRoute>(`/api/v1/routes/${encodeURIComponent(routeId)}/live`, {
-      direction_id: directionId,
-    }),
+  liveRoute: (agency: string, routeId: string, directionId?: number) =>
+    getJson<LiveRoute>(`${routePath(agency, routeId)}/live`, { direction_id: directionId }),
 
-  // The whole network right now, split by mode.
-  systemLive: () => getJson<SystemLive>('/api/v1/system/live'),
+  // A whole city's network right now, split by mode.
+  regionLive: (region: string) =>
+    getJson<RegionLive>(`/api/v1/regions/${encodeURIComponent(region)}/live`),
 
   // One route's weekly day-by-hour grid for a date range.
-  historicalRoute: (routeId: string, params: HistoricalParams) =>
-    getJson<HistoricalRoute>(`/api/v1/routes/${encodeURIComponent(routeId)}/historical`, {
+  historicalRoute: (agency: string, routeId: string, params: HistoricalParams) =>
+    getJson<HistoricalRoute>(`${routePath(agency, routeId)}/historical`, {
       start_date: params.startDate,
       end_date: params.endDate,
       direction_id: params.directionId,
     }),
 
-  // Routes ordered from most to least reliable.
-  rankings: (params: RankingsParams) =>
-    getJson<Rankings>('/api/v1/performance/rankings', {
+  // A city's routes ordered from most to least reliable.
+  rankings: (region: string, params: RankingsParams) =>
+    getJson<Rankings>(`/api/v1/regions/${encodeURIComponent(region)}/rankings`, {
       metric: params.metric,
       days: params.days,
       min_samples: params.minSamples,

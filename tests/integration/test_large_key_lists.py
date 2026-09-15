@@ -24,7 +24,7 @@ ARRIVAL = dt.datetime(2026, 9, 14, 12, 5, tzinfo=dt.UTC)
 def test_load_schedule_with_thousands_of_pairs(engine: Engine) -> None:
     pairs = {(f"missing-trip-{n}", n) for n in range(KEY_COUNT)} | {("red-1", 2)}
     with engine.connect() as conn:
-        schedule = load_schedule(conn, pairs)
+        schedule = load_schedule(conn, "mbta", pairs)
     assert schedule == {("red-1", 2): (90600, 90600)}
 
 
@@ -35,6 +35,7 @@ def test_load_group_events_with_thousands_of_groups(engine: Engine) -> None:
             insert(StopEvent),
             [
                 {
+                    "agency": "mbta",
                     "trip_id": "red-3",
                     "service_date": ARRIVAL.date(),
                     "stop_sequence": 2,
@@ -47,5 +48,5 @@ def test_load_group_events_with_thousands_of_groups(engine: Engine) -> None:
         )
     groups = {("Red", n % 2, f"stop-{n}") for n in range(KEY_COUNT)} | {("Red", 0, "70063")}
     with engine.connect() as conn:
-        events = load_group_events(conn, groups, ARRIVAL - dt.timedelta(hours=1))
+        events = load_group_events(conn, "mbta", groups, ARRIVAL - dt.timedelta(hours=1))
     assert [(event.trip_id, event.stop_id) for event in events] == [("red-3", "70063")]

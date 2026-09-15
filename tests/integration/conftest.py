@@ -95,7 +95,15 @@ def clean_realtime(engine: Engine) -> None:
         )
 
 
-# Load the fixture feed into the test database fresh for a test (force=True replaces earlier data).
+# Load the fixture feed into the test database as the MBTA's timetable (force=True replaces the
+# MBTA rows from earlier tests).
 @pytest.fixture
 def loaded_feed(engine: Engine, gtfs_zip: Path) -> LoadResult:
-    return load_static_gtfs(engine, gtfs_zip, force=True)
+    return load_static_gtfs(engine, gtfs_zip, "mbta", force=True)
+
+
+# Load the same fixture feed again as LA Metro Rail's timetable. Its route, trip, and stop ids are
+# identical to the MBTA copy, which is exactly what tests of agency separation need.
+@pytest.fixture
+def loaded_la_rail_feed(engine: Engine, gtfs_zip: Path) -> LoadResult:
+    return load_static_gtfs(engine, gtfs_zip, "lametro-rail", force=True)

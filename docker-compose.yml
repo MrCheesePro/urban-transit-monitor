@@ -20,6 +20,9 @@ services:
     command: alembic upgrade head
     environment: &app-env
       DATABASE_URL: postgresql+psycopg://transit:transit@db:5432/transit
+      # Read from .env by Compose. Empty means no key: Los Angeles shows timetables only.
+      LA_METRO_API_KEY: ${LA_METRO_API_KEY:-}
+      LA_METRO_API_KEY_HEADER: ${LA_METRO_API_KEY_HEADER:-Authorization}
     depends_on:
       db:
         condition: service_healthy

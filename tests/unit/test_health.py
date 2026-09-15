@@ -6,7 +6,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from app.api.main import app
-from app.core.job_health import JOB_NAMES
+from app.core.config import get_settings
+from app.core.job_health import expected_jobs
 from app.db.session import get_session
 
 
@@ -31,15 +32,18 @@ def client() -> Iterator[TestClient]:
     app.dependency_overrides.clear()
 
 
-# With the database up but no job ever run, /health lists every job as never_run and is degraded.
+# With the database up but no job ever run, /health is degraded and lists every expected job for
+# every agency: jobs that should run are never_run, and jobs waiting for an API key are
+# not_configured.
 def test_health_before_any_job_runs(client: TestClient) -> None:
     app.dependency_overrides[get_session] = lambda: _EmptySession()
     response = client.get("/health")
     assert response.status_code == 200
     body = response.json()
     assert (body["status"], body["database"]) == ("degraded", "up")
-    assert [(job["job"], job["state"]) for job in body["jobs"]] == [
-        (name, "never_run") for name in JOB_NAMES
+    assert [(job["job"], job["agency"], job["state"]) for job in body["jobs"]] == [
+        (expected.job, expected.agency, "never_run" if expected.configured else "not_configured")
+        for expected in expected_jobs(get_settings())
     ]
 
 

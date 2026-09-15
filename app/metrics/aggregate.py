@@ -67,6 +67,7 @@ class CombinedPerformance:
 # returned by the rankings query. rank_routes turns these into averages.
 @dataclass(frozen=True)
 class RouteTotals:
+    agency: str
     route_id: str
     sample_count: int
     headway_sample_count: int
@@ -81,6 +82,7 @@ class RouteTotals:
 @dataclass(frozen=True)
 class RankedRoute:
     rank: int
+    agency: str
     route_id: str
     sample_count: int
     headway_sample_count: int
@@ -260,6 +262,7 @@ def _route_averages(totals: RouteTotals) -> RankedRoute:
     samples = totals.sample_count
     return RankedRoute(
         rank=0,
+        agency=totals.agency,
         route_id=totals.route_id,
         sample_count=samples,
         headway_sample_count=totals.headway_sample_count,
@@ -303,6 +306,6 @@ def rank_routes(
             continue
         sort_value = -value if metric == "on_time" else value
         eligible.append((sort_value, weight, route))
-    eligible.sort(key=lambda item: (item[0], -item[1], item[2].route_id))
+    eligible.sort(key=lambda item: (item[0], -item[1], item[2].agency, item[2].route_id))
     ranked = [replace(route, rank=position) for position, (_, _, route) in enumerate(eligible, 1)]
     return ranked, excluded

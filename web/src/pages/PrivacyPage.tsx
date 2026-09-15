@@ -14,7 +14,8 @@ export function PrivacyPage() {
         <h2>Who runs Linecheck</h2>
         <p>
           Linecheck is an independent project run by {OWNER_NAME}. It is not operated by, affiliated with, or
-          endorsed by the Massachusetts Bay Transportation Authority (MBTA).
+          endorsed by the Massachusetts Bay Transportation Authority (MBTA) or the Los Angeles County
+          Metropolitan Transportation Authority (LA Metro).
         </p>
 
         <h2>Information we collect</h2>
@@ -43,7 +44,8 @@ export function PrivacyPage() {
 
         <h2>Transit data</h2>
         <p>
-          The vehicle and timetable data shown on this site comes from the MBTA&apos;s public feeds. It
+          The vehicle and timetable data shown on this site comes from the public feeds of the MBTA and LA
+          Metro. Linecheck&apos;s server downloads it directly; your browser never contacts those agencies. It
           describes buses, trains, and ferries, not the people riding them.
         </p>
 

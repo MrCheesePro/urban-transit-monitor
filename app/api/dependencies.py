@@ -1,0 +1,23 @@
+"""FastAPI dependencies shared by several routers."""
+
+from fastapi import HTTPException
+
+from app.core.agencies import Agency, Region, find_agency, find_region
+from app.core.config import get_settings
+
+
+# Resolve the {agency} path parameter to an enabled agency, or answer 404 so a typo or a
+# switched-off city gives a clear error.
+def require_agency(agency: str) -> Agency:
+    found = find_agency(get_settings(), agency)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"agency {agency!r} not found")
+    return found
+
+
+# Resolve the {region} path parameter to an enabled region, or answer 404.
+def require_region(region: str) -> Region:
+    found = find_region(get_settings(), region)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"region {region!r} not found")
+    return found

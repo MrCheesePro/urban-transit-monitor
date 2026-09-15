@@ -7,6 +7,7 @@ import {
   ErrorPanel,
   Freshness,
   LoadingPanel,
+  RealtimeNotConnected,
   SectionTitle,
   SeverityBadge,
   StatTile,
@@ -31,13 +32,14 @@ import {
   secondsSince,
   signedDelay,
 } from '@/lib/format'
-import { useLiveRoute, useRoutes } from '@/lib/queries'
+import { useLiveRoute, useRegionRoutes } from '@/lib/queries'
+import { regionCenter, useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
 type DirectionChoice = 'both' | '0' | '1'
 
 // Where a vehicle is, in words, using the stop's name from the timetable when there is one, for
-// example "Stopped at Harvard" or "Heading to Park Street".
+// example "Stopped at Harvard" or "Heading to Union Station".
 function positionText(vehicle: LiveVehicle): string {
   const stop = vehicle.stop_name ?? (vehicle.stop_id ? `stop ${vehicle.stop_id}` : null)
   if (stop === null) return 'Location on map only'
@@ -54,46 +56,61 @@ function byDelay(a: LiveVehicle, b: LiveVehicle): number {
 }
 
 // A line's live page: every vehicle heard from in the last few minutes on a map and in a table,
-// each with its estimated delay, plus the line's overall status. Refreshes every 30 seconds.
+// each with its estimated delay, plus the line's overall status. Refreshes every 30 seconds. For a
+// city whose live feeds are not connected it says so instead.
 export function LineLivePage() {
-  const { routeId = '' } = useParams()
-  const routes = useRoutes()
-  const route = routes.data?.find((candidate) => candidate.route_id === routeId)
+  const region = useRegion()
+  const { agency = '', routeId = '' } = useParams()
+  const routes = useRegionRoutes(region.slug)
+  const route = routes.data?.find(
+    (candidate) => candidate.agency === agency && candidate.route_id === routeId,
+  )
   const [direction, setDirection] = useState<DirectionChoice>('both')
-  const live = useLiveRoute(routeId, direction === 'both' ? undefined : Number(direction))
+  const live = useLiveRoute(agency, routeId, direction === 'both' ? undefined : Number(direction))
   useDocumentTitle(route ? `${routeName(route)} live` : 'Line')
 
-  if (routes.data && !route) return <LineNotFound routeId={routeId} />
+  if (routes.data && !route) return <LineNotFound region={region} routeId={routeId} />
   const vehicles = [...(live.data?.vehicles ?? [])].sort(byDelay)
+  const connected = live.data?.realtime_configured ?? true
 
   return (
     <Container>
-      <LineHeader route={route} routeId={routeId} />
+      <LineHeader region={region} agency={agency} route={route} routeId={routeId} />
 
-      <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-        <div className="w-52">
-          <Label htmlFor="direction">Direction</Label>
-          <Select value={direction} onValueChange={(value) => setDirection(value as DirectionChoice)}>
-            <SelectTrigger id="direction" className="mt-1.5 w-full bg-card">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="both">Both directions</SelectItem>
-              <SelectItem value="0">Direction 0</SelectItem>
-              <SelectItem value="1">Direction 1</SelectItem>
-            </SelectContent>
-          </Select>
+      {connected ? (
+        <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
+          <div className="w-52">
+            <Label htmlFor="direction">Direction</Label>
+            <Select value={direction} onValueChange={(value) => setDirection(value as DirectionChoice)}>
+              <SelectTrigger id="direction" className="mt-1.5 w-full bg-card">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="both">Both directions</SelectItem>
+                <SelectItem value="0">Direction 0</SelectItem>
+                <SelectItem value="1">Direction 1</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {live.data ? (
+            <Freshness
+              asOf={live.data.as_of}
+              ageSeconds={live.data.data_age_seconds}
+              stale={live.data.stale}
+              operator={region.operator}
+              timeZone={region.timezone}
+            />
+          ) : null}
         </div>
-        {live.data ? (
-          <Freshness asOf={live.data.as_of} ageSeconds={live.data.data_age_seconds} stale={live.data.stale} />
-        ) : null}
-      </div>
+      ) : null}
 
       <div className="mt-6">
         {live.isPending ? (
           <LoadingPanel rows={4} label="Loading live vehicles" />
         ) : live.isError ? (
           <ErrorPanel what="live vehicles" error={live.error} onRetry={() => void live.refetch()} />
+        ) : !live.data.realtime_configured ? (
+          <RealtimeNotConnected operator={region.operator} />
         ) : (
           <>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -123,7 +140,11 @@ export function LineLivePage() {
                   <p className="mb-3 mt-1 text-sm text-muted-foreground">
                     Each dot is a vehicle, colored by how late it is.
                   </p>
-                  <VehicleMap vehicles={vehicles} fitKey={`${routeId}-${direction}`} />
+                  <VehicleMap
+                    vehicles={vehicles}
+                    fitKey={`${agency}-${routeId}-${direction}`}
+                    center={regionCenter(region.slug)}
+                  />
                 </section>
 
                 <section aria-labelledby="vehicle-table" className="mt-10">
