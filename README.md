@@ -2,8 +2,6 @@
 
 A backend service and website that watch live vehicle feeds for two cities, Boston (MBTA) and Los Angeles (LA Metro bus and rail), work out how late each bus and train is against the published timetable, reconstruct when vehicles actually reached each stop, and turn that into hourly on-time and headway statistics you can explore by city, line, hour, and day of week.
 
-LA Metro's live feeds need an API key. Without one, Los Angeles shows lines and timetables only; see [Adding LA Metro live data](#adding-la-metro-live-data).
-
 Status: milestones M0 through M5 are complete, plus the Linecheck website. See [docs/DESIGN.md](docs/DESIGN.md) for the full design, schema, and open items.
 
 ![Linecheck home page showing the live MBTA network](docs/images/website-home.png)
@@ -197,16 +195,6 @@ To rebuild hourly statistics for recent hours, for example after the worker was 
 uv run python -m app.pipeline.aggregate --hours 48
 ```
 
-### Adding LA Metro live data
-
-LA Metro's timetables are open, but its live vehicle feeds are served through Swiftly's API and need a key. Request one from LA Metro's developer program ([developer.metro.net](https://developer.metro.net)), then add it to `.env` (never commit it):
-
-```bash
-LA_METRO_API_KEY=your-key-here
-```
-
-Restart the worker. It schedules LA Metro's live jobs only when the key is set; until then `/health` lists them as `not_configured` and the website says live data is not connected. If the key must be sent in a header other than `Authorization`, set `LA_METRO_API_KEY_HEADER`, and the feed addresses can be changed with the `LA_METRO_*_URL` settings.
-
 ## Configuration
 
 Every setting can be overridden with an environment variable of the same name. The full list is in [.env.example](.env.example); the most useful ones:
@@ -215,8 +203,6 @@ Every setting can be overridden with an environment variable of the same name. T
 |---|---|---|
 | `DATABASE_URL` | `postgresql+psycopg://transit:transit@localhost:5434/transit` | Database connection |
 | `ENABLED_REGIONS` | `["boston","los-angeles"]` | Cities to follow |
-| `LA_METRO_API_KEY` | not set | Key for LA Metro's live feeds; LA live jobs are off without it |
-| `LA_METRO_API_KEY_HEADER` | `Authorization` | Header the LA Metro key is sent in |
 | `POLL_INTERVAL_SECONDS` | `60` | How often live feeds are polled |
 | `ON_TIME_EARLY_SECONDS` / `ON_TIME_LATE_SECONDS` | `-60` / `300` | On-time window |
 | `SEVERITY_MAJOR_SECONDS` / `SEVERITY_SEVERE_SECONDS` | `600` / `1200` | Live severity cutoffs |
