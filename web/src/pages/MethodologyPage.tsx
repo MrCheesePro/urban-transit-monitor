@@ -18,7 +18,8 @@ export function MethodologyPage() {
         <h2>Where the data comes from</h2>
         <p>
           Linecheck covers three places: Boston, run by the MBTA; Los Angeles, where LA Metro bus and rail run
-          alongside LADOT Transit and Long Beach Transit; and Orange County, run by OCTA. Each
+          alongside LADOT Transit, Long Beach Transit and Torrance Transit; and Orange County, run by OCTA.
+          Each
           agency publishes two kinds of data. The <strong>timetable</strong> (GTFS) lists every trip and the
           time it is scheduled at each stop. The <strong>live feeds</strong> (GTFS-Realtime) report where each
           vehicle is and when it is predicted to reach its upcoming stops.

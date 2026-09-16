@@ -78,6 +78,7 @@ def test_lists_regions() -> None:
         ("lametro-rail", agency("lametro-rail").realtime_enabled),
         ("ladot", True),
         ("longbeach", True),
+        ("torrance", True),
     ]
     assert [(item["slug"], item["realtime_configured"]) for item in orange_county["agencies"]] == [
         ("octa", True)

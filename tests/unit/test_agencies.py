@@ -19,8 +19,28 @@ def test_default_regions_and_agencies() -> None:
         ("lametro-rail", "los-angeles", "America/Los_Angeles"),
         ("ladot", "los-angeles", "America/Los_Angeles"),
         ("longbeach", "los-angeles", "America/Los_Angeles"),
+        ("torrance", "los-angeles", "America/Los_Angeles"),
         ("octa", "orange-county", "America/Los_Angeles"),
     ]
+
+
+# Torrance Transit's timetable host answers 403 unless the request looks like a browser, so its
+# entry asks for browser headers. No other agency sends any.
+def test_browser_headers_only_where_needed() -> None:
+    settings = Settings(_env_file=None)
+    torrance = find_agency(settings, "torrance")
+    mbta = find_agency(settings, "mbta")
+    assert torrance is not None and mbta is not None
+    assert set(torrance.static_headers()) == {
+        "User-Agent",
+        "Accept-Language",
+        "Accept-Encoding",
+        "Sec-Fetch-Dest",
+        "Sec-Fetch-Mode",
+        "Sec-Fetch-Site",
+        "Upgrade-Insecure-Requests",
+    }
+    assert mbta.static_headers() == {}
 
 
 # Only LA Metro's feeds need a key. Every other agency's live feeds are open, so they are ready to

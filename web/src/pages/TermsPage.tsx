@@ -50,8 +50,8 @@ export function TermsPage() {
 
         <h2>Relationship to the transit agencies</h2>
         <p>
-          Linecheck is not affiliated with or endorsed by the MBTA, LA Metro, LADOT Transit, Long Beach Transit
-          or OCTA. Line names and line colors are used only to identify each agency&apos;s
+          Linecheck is not affiliated with or endorsed by the MBTA, LA Metro, LADOT Transit, Long Beach
+          Transit, Torrance Transit or OCTA. Line names and line colors are used only to identify each agency&apos;s
           services. Transit data is provided by those agencies and is subject to their own terms for
           developers, described at{' '}
           <a href="https://www.mbta.com/developers" target="_blank" rel="noreferrer">

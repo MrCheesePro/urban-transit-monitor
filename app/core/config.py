@@ -62,6 +62,13 @@ class Settings(BaseSettings):
         "https://gtfs-rt.lbt.vontascloud.com/TMGTFSRealTimeWebService/TripUpdate/TripUpdates.pb"
     )
 
+    # Torrance Transit. Open feeds, no key. Its live feeds come from the BusTime portal the city
+    # runs, and its timetable host only answers requests that look like a browser (see
+    # BROWSER_HEADERS in app/core/agencies.py).
+    torrance_static_gtfs_url: str = "https://transit.torranceca.gov/gtfs_feed"
+    torrance_vehicle_positions_url: str = "https://www.mybusinfo.com/gtfsrt/vehicles"
+    torrance_trip_updates_url: str = "https://www.mybusinfo.com/gtfsrt/trips"
+
     # Orange County (OCTA). Open timetable and open live feeds, no key.
     octa_static_gtfs_url: str = "https://www.octa.net/current/google_transit.zip"
     octa_vehicle_positions_url: str = (

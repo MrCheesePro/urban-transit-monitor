@@ -1,6 +1,6 @@
 # Linecheck: Urban Public Transit Reliability & Delay Monitor
 
-A backend service and website that watch live vehicle feeds for three places, Boston (MBTA), Los Angeles (LA Metro bus and rail, LADOT Transit, Long Beach Transit), and Orange County (OCTA), work out how late each bus and train is against the published timetable, reconstruct when vehicles actually reached each stop, and turn that into hourly on-time and headway statistics you can explore by city, line, hour, and day of week.
+A backend service and website that watch live vehicle feeds for three places, Boston (MBTA), Los Angeles (LA Metro bus and rail, LADOT Transit, Long Beach Transit, Torrance Transit), and Orange County (OCTA), work out how late each bus and train is against the published timetable, reconstruct when vehicles actually reached each stop, and turn that into hourly on-time and headway statistics you can explore by city, line, hour, and day of week.
 
 Status: milestones M0 through M5 are complete, plus the Linecheck website. See [docs/DESIGN.md](docs/DESIGN.md) for the full design, schema, and open items.
 
@@ -35,7 +35,7 @@ Status: milestones M0 through M5 are complete, plus the Linecheck website. See [
 
 ```mermaid
 flowchart LR
-    subgraph SOURCES["Per agency: MBTA, LA Metro Bus and Rail, LADOT, Long Beach, OCTA"]
+    subgraph SOURCES["Per agency: MBTA, LA Metro Bus and Rail, LADOT, Long Beach, Torrance, OCTA"]
         GTFS["Static GTFS zip (timetable)"]
         VP_FEED["Vehicle positions feed"]
         TU_FEED["Trip updates feed"]
@@ -245,9 +245,10 @@ docs/           design document and images
 - Trips an agency adds outside the timetable (common for MBTA subway service and shuttles) get no delay estimate and no stop arrivals.
 - Arrival times are estimates bounded by the polling interval, not exact door-open times.
 - Direction names are not loaded yet, so the website shows "Direction 0" and "Direction 1".
-- Torrance Transit, Foothill Transit, Culver CityBus, and Metrolink are not covered: their live feeds need a key or an approved request to the agency, and Torrance's timetable is not served to non-browser clients.
+- Foothill Transit, Culver CityBus, and Metrolink are not covered: their live feeds need a key or an approved request to the agency.
+- Torrance Transit's timetable host answers 403 unless the request carries browser headers, so its agency entry sends them (`BROWSER_HEADERS` in `app/core/agencies.py`).
 - Big Blue Bus is not covered: its live feed and its timetable use different trip ids and different route ids, so no delay, arrival, or ranking can be calculated from them.
 
 ## Data sources
 
-Transit data comes from the public GTFS and GTFS-Realtime feeds of the Massachusetts Bay Transportation Authority, the Los Angeles County Metropolitan Transportation Authority (LA Metro's live data through Swiftly), LADOT Transit, Long Beach Transit, and the Orange County Transportation Authority. Map data is from OpenStreetMap contributors. This project is not affiliated with or endorsed by any of these agencies.
+Transit data comes from the public GTFS and GTFS-Realtime feeds of the Massachusetts Bay Transportation Authority, the Los Angeles County Metropolitan Transportation Authority (LA Metro's live data through Swiftly), LADOT Transit, Long Beach Transit, Torrance Transit, and the Orange County Transportation Authority. Map data is from OpenStreetMap contributors. This project is not affiliated with or endorsed by any of these agencies.

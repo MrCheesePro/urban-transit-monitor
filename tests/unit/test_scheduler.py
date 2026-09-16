@@ -15,6 +15,7 @@ def test_static_jobs_run_in_each_agency_timezone() -> None:
         ("lametro-rail", "America/Los_Angeles"),
         ("ladot", "America/Los_Angeles"),
         ("longbeach", "America/Los_Angeles"),
+        ("torrance", "America/Los_Angeles"),
         ("octa", "America/Los_Angeles"),
     ):
         job = scheduler.get_job(job_id("load_static_gtfs", slug))
@@ -40,7 +41,7 @@ def test_live_job_timetables() -> None:
 def test_la_live_jobs_need_api_key() -> None:
     assert build_scheduler(NO_KEY).get_job(job_id("poll_realtime", "lametro-bus")) is None
     assert build_scheduler(WITH_KEY).get_job(job_id("poll_realtime", "lametro-bus")) is not None
-    for slug in ("ladot", "longbeach", "octa"):
+    for slug in ("ladot", "longbeach", "torrance", "octa"):
         assert build_scheduler(NO_KEY).get_job(job_id("poll_realtime", slug)) is not None
 
 

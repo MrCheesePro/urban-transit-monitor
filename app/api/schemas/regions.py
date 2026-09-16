@@ -1,8 +1,8 @@
 from pydantic import BaseModel
 
 
-# One agency within a region (for Los Angeles: LA Metro Bus, LA Metro Rail, LADOT Transit, or Long
-# Beach Transit), and whether its live
+# One agency within a region (for Los Angeles: LA Metro Bus, LA Metro Rail, LADOT Transit, Long
+# Beach Transit, or Torrance Transit), and whether its live
 # feeds are connected. When realtime_configured is false only its timetable is available.
 class AgencyOut(BaseModel):
     slug: str

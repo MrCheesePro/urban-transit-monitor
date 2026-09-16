@@ -122,7 +122,7 @@ function SiteFooter() {
         <div className="space-y-2 text-muted-foreground">
           <p>
             Transit data comes from the public GTFS and GTFS-Realtime feeds of the MBTA, LA Metro, LADOT,
-            Long Beach Transit and OCTA. Linecheck is an independent project and is not affiliated with or
+            Long Beach Transit, Torrance Transit and OCTA. Linecheck is an independent project and is not affiliated with or
             endorsed by any of these agencies.
           </p>
           <p>

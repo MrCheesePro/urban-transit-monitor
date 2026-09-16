@@ -16,7 +16,8 @@ export function PrivacyPage() {
           Linecheck is an independent project run by {OWNER_NAME}. It is not operated by, affiliated with, or
           endorsed by any of the transit agencies whose data it shows, including the Massachusetts Bay
           Transportation Authority (MBTA), the Los Angeles County Metropolitan Transportation Authority (LA
-          Metro), LADOT Transit, Long Beach Transit and the Orange County Transportation Authority (OCTA).
+          Metro), LADOT Transit, Long Beach Transit, Torrance Transit and the Orange County Transportation
+          Authority (OCTA).
         </p>
 
         <h2>Information we collect</h2>

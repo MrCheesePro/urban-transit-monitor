@@ -137,9 +137,15 @@ class LoadResult:
 
 
 # Download a static GTFS zip to `dest`. It streams to disk in chunks so a large file is never held
-# in memory all at once. Raises on HTTP errors (4xx/5xx) or timeouts.
-def download_feed(url: str, dest: Path, timeout_seconds: float) -> Path:
-    with httpx.stream("GET", url, timeout=timeout_seconds, follow_redirects=True) as response:
+# in memory all at once. `headers` carries the browser-like headers the one fussy timetable host
+# demands (see Agency.static_headers); other agencies pass none. Raises on HTTP errors (4xx/5xx) or
+# timeouts.
+def download_feed(
+    url: str, dest: Path, timeout_seconds: float, headers: dict[str, str] | None = None
+) -> Path:
+    with httpx.stream(
+        "GET", url, timeout=timeout_seconds, follow_redirects=True, headers=headers
+    ) as response:
         response.raise_for_status()
         with dest.open("wb") as fh:
             for chunk in response.iter_bytes():
@@ -252,7 +258,10 @@ def download_and_load(
 ) -> LoadResult:
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = download_feed(
-            agency.static_gtfs_url, Path(tmp) / "gtfs.zip", settings.http_timeout_seconds
+            agency.static_gtfs_url,
+            Path(tmp) / "gtfs.zip",
+            settings.http_timeout_seconds,
+            agency.static_headers(),
         )
         return load_static_gtfs(engine, zip_path, agency.slug, force=force)
 
