@@ -2,7 +2,8 @@
 // JSON the API returns exactly. Timestamps are ISO 8601 strings in UTC.
 //
 // A region is a city as the site shows it (Boston, Los Angeles). An agency is one timetable and set
-// of live feeds inside a region (the MBTA; LA Metro Bus and LA Metro Rail). Route ids are only unique
+// of live feeds inside a region (the MBTA; LA Metro Bus, LA Metro Rail, LADOT Transit, and Long Beach
+// Transit; OCTA). Route ids are only unique
 // within an agency, so a route is always identified by its agency slug plus its route id.
 
 export type Severity = 'on_time' | 'early' | 'minor' | 'major' | 'severe' | 'unknown'

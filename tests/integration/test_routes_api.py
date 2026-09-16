@@ -64,14 +64,23 @@ def test_lists_regions() -> None:
     body = client.get("/api/v1/regions").json()
     assert [(region["slug"], region["operator"]) for region in body] == [
         ("boston", "MBTA"),
-        ("los-angeles", "LA Metro"),
+        ("los-angeles", "Los Angeles transit"),
+        ("orange-county", "OCTA"),
     ]
-    boston, los_angeles = body
+    boston, los_angeles, orange_county = body
     assert [(item["slug"], item["realtime_configured"]) for item in boston["agencies"]] == [
         ("mbta", True)
     ]
+    # Los Angeles holds LA Metro's two feeds plus the three operators with open live feeds, so only
+    # the LA Metro entries depend on whether an API key is configured.
     assert [(item["slug"], item["realtime_configured"]) for item in los_angeles["agencies"]] == [
         ("lametro-bus", agency("lametro-bus").realtime_enabled),
         ("lametro-rail", agency("lametro-rail").realtime_enabled),
+        ("ladot", True),
+        ("longbeach", True),
+    ]
+    assert [(item["slug"], item["realtime_configured"]) for item in orange_county["agencies"]] == [
+        ("octa", True)
     ]
     assert los_angeles["timezone"] == "America/Los_Angeles"
+    assert orange_county["timezone"] == "America/Los_Angeles"

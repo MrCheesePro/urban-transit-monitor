@@ -121,8 +121,9 @@ function SiteFooter() {
       <div className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8 text-sm sm:grid-cols-2 sm:px-6">
         <div className="space-y-2 text-muted-foreground">
           <p>
-            Transit data comes from the public GTFS and GTFS-Realtime feeds of the MBTA and LA Metro.
-            Linecheck is an independent project and is not affiliated with or endorsed by either agency.
+            Transit data comes from the public GTFS and GTFS-Realtime feeds of the MBTA, LA Metro, LADOT,
+            Long Beach Transit and OCTA. Linecheck is an independent project and is not affiliated with or
+            endorsed by any of these agencies.
           </p>
           <p>
             &copy; {year} {OWNER_NAME}

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # Which cities to follow (see app/core/agencies.py). In an environment variable this is a JSON
     # list, for example ENABLED_REGIONS='["boston"]'.
-    enabled_regions: list[str] = ["boston", "los-angeles"]
+    enabled_regions: list[str] = ["boston", "los-angeles", "orange-county"]
 
     # Boston (MBTA). All feeds are open and need no key.
     mbta_vehicle_positions_url: str = "https://cdn.mbta.com/realtime/VehiclePositions.pb"
@@ -44,6 +44,30 @@ class Settings(BaseSettings):
     la_metro_rail_trip_updates_url: str = (
         "https://api.goswift.ly/real-time/lametro-rail/gtfs-rt-trip-updates"
     )
+
+    # The other Los Angeles area operators. Unlike LA Metro, all of these publish open timetables
+    # and open live feeds, so they need no key and run as soon as the region is switched on.
+    # LADOT runs the DASH neighborhood shuttles and the Commuter Express routes.
+    ladot_static_gtfs_url: str = "https://ladotbus.com/gtfs"
+    ladot_vehicle_positions_url: str = "https://ladotbus.com/gtfs-rt/vehiclepositions"
+    ladot_trip_updates_url: str = "https://ladotbus.com/gtfs-rt/tripupdates"
+    # Long Beach Transit. Its timetable is hosted for it by National RTAP.
+    long_beach_static_gtfs_url: str = (
+        "https://rapid.nationalrtap.org/GTFSFileManagement/UserUploadFiles/14866/google_transit.zip"
+    )
+    long_beach_vehicle_positions_url: str = (
+        "https://gtfs-rt.lbt.vontascloud.com/TMGTFSRealTimeWebService/Vehicle/VehiclePositions.pb"
+    )
+    long_beach_trip_updates_url: str = (
+        "https://gtfs-rt.lbt.vontascloud.com/TMGTFSRealTimeWebService/TripUpdate/TripUpdates.pb"
+    )
+
+    # Orange County (OCTA). Open timetable and open live feeds, no key.
+    octa_static_gtfs_url: str = "https://www.octa.net/current/google_transit.zip"
+    octa_vehicle_positions_url: str = (
+        "https://api.octa.net/GTFSRealTime/protoBuf/VehiclePositions.aspx"
+    )
+    octa_trip_updates_url: str = "https://api.octa.net/GTFSRealTime/protoBuf/tripupdates.aspx"
 
     http_timeout_seconds: float = 60.0
     realtime_http_timeout_seconds: float = 15.0

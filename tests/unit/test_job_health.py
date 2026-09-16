@@ -91,6 +91,18 @@ def test_expected_jobs_per_agency() -> None:
         ("derive_stop_events", "lametro-rail", False),
         ("aggregate_hourly", "lametro-rail", False),
         ("load_static_gtfs", "lametro-rail", True),
+        ("poll_realtime", "ladot", True),
+        ("derive_stop_events", "ladot", True),
+        ("aggregate_hourly", "ladot", True),
+        ("load_static_gtfs", "ladot", True),
+        ("poll_realtime", "longbeach", True),
+        ("derive_stop_events", "longbeach", True),
+        ("aggregate_hourly", "longbeach", True),
+        ("load_static_gtfs", "longbeach", True),
+        ("poll_realtime", "octa", True),
+        ("derive_stop_events", "octa", True),
+        ("aggregate_hourly", "octa", True),
+        ("load_static_gtfs", "octa", True),
         ("retention", None, True),
     ]
     assert all(expected.configured for expected in expected_jobs(WITH_KEY))

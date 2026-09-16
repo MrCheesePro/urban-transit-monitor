@@ -1,6 +1,6 @@
 # Linecheck: Urban Public Transit Reliability & Delay Monitor
 
-A backend service and website that watch live vehicle feeds for two cities, Boston (MBTA) and Los Angeles (LA Metro bus and rail), work out how late each bus and train is against the published timetable, reconstruct when vehicles actually reached each stop, and turn that into hourly on-time and headway statistics you can explore by city, line, hour, and day of week.
+A backend service and website that watch live vehicle feeds for three places, Boston (MBTA), Los Angeles (LA Metro bus and rail, LADOT Transit, Long Beach Transit), and Orange County (OCTA), work out how late each bus and train is against the published timetable, reconstruct when vehicles actually reached each stop, and turn that into hourly on-time and headway statistics you can explore by city, line, hour, and day of week.
 
 Status: milestones M0 through M5 are complete, plus the Linecheck website. See [docs/DESIGN.md](docs/DESIGN.md) for the full design, schema, and open items.
 
@@ -35,7 +35,7 @@ Status: milestones M0 through M5 are complete, plus the Linecheck website. See [
 
 ```mermaid
 flowchart LR
-    subgraph SOURCES["Per agency: MBTA, LA Metro Bus, LA Metro Rail"]
+    subgraph SOURCES["Per agency: MBTA, LA Metro Bus and Rail, LADOT, Long Beach, OCTA"]
         GTFS["Static GTFS zip (timetable)"]
         VP_FEED["Vehicle positions feed"]
         TU_FEED["Trip updates feed"]
@@ -202,7 +202,7 @@ Every setting can be overridden with an environment variable of the same name. T
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+psycopg://transit:transit@localhost:5434/transit` | Database connection |
-| `ENABLED_REGIONS` | `["boston","los-angeles"]` | Cities to follow |
+| `ENABLED_REGIONS` | `["boston","los-angeles","orange-county"]` | Cities to follow |
 | `POLL_INTERVAL_SECONDS` | `60` | How often live feeds are polled |
 | `ON_TIME_EARLY_SECONDS` / `ON_TIME_LATE_SECONDS` | `-60` / `300` | On-time window |
 | `SEVERITY_MAJOR_SECONDS` / `SEVERITY_SEVERE_SECONDS` | `600` / `1200` | Live severity cutoffs |
@@ -245,8 +245,9 @@ docs/           design document and images
 - Trips an agency adds outside the timetable (common for MBTA subway service and shuttles) get no delay estimate and no stop arrivals.
 - Arrival times are estimates bounded by the polling interval, not exact door-open times.
 - Direction names are not loaded yet, so the website shows "Direction 0" and "Direction 1".
-- LA Metro's live feed addresses follow Swiftly's documented pattern but have not been checked with a real key yet.
+- Torrance Transit, Foothill Transit, Culver CityBus, and Metrolink are not covered: their live feeds need a key or an approved request to the agency, and Torrance's timetable is not served to non-browser clients.
+- Big Blue Bus is not covered: its live feed and its timetable use different trip ids and different route ids, so no delay, arrival, or ranking can be calculated from them.
 
 ## Data sources
 
-Transit data comes from the public GTFS and GTFS-Realtime feeds of the Massachusetts Bay Transportation Authority and the Los Angeles County Metropolitan Transportation Authority (LA Metro's live data through Swiftly). Map data is from OpenStreetMap contributors. This project is not affiliated with or endorsed by either agency.
+Transit data comes from the public GTFS and GTFS-Realtime feeds of the Massachusetts Bay Transportation Authority, the Los Angeles County Metropolitan Transportation Authority (LA Metro's live data through Swiftly), LADOT Transit, Long Beach Transit, and the Orange County Transportation Authority. Map data is from OpenStreetMap contributors. This project is not affiliated with or endorsed by any of these agencies.

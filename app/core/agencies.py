@@ -2,7 +2,8 @@
 
 Every database table stores an `agency` slug, so the same route, trip, or stop id can exist in two
 agencies without colliding. A region is what the website shows as one city. LA Metro publishes its
-buses and its trains as two separate GTFS feeds, so the Los Angeles region holds two agencies.
+buses and its trains as two separate GTFS feeds, and several other operators run their own service
+in the same city, so the Los Angeles region holds four agencies.
 """
 
 from dataclasses import dataclass
@@ -51,10 +52,13 @@ _REGIONS = (
     Region(
         "los-angeles",
         "Los Angeles",
-        "LA Metro",
+        # The operator name is used in sentences such as "<operator> data from 4:12 PM", so a city
+        # served by several operators is named after the city rather than after one of them.
+        "Los Angeles transit",
         "America/Los_Angeles",
-        ("lametro-bus", "lametro-rail"),
+        ("lametro-bus", "lametro-rail", "ladot", "longbeach"),
     ),
+    Region("orange-county", "Orange County", "OCTA", "America/Los_Angeles", ("octa",)),
 )
 
 KNOWN_REGIONS = {region.slug: region for region in _REGIONS}
@@ -98,6 +102,42 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             requires_api_key=True,
             api_key=settings.la_metro_api_key,
             api_key_header=settings.la_metro_api_key_header,
+        ),
+        "ladot": Agency(
+            slug="ladot",
+            region="los-angeles",
+            name="LADOT Transit",
+            timezone="America/Los_Angeles",
+            static_gtfs_url=settings.ladot_static_gtfs_url,
+            vehicle_positions_url=settings.ladot_vehicle_positions_url,
+            trip_updates_url=settings.ladot_trip_updates_url,
+            requires_api_key=False,
+            api_key=None,
+            api_key_header="Authorization",
+        ),
+        "longbeach": Agency(
+            slug="longbeach",
+            region="los-angeles",
+            name="Long Beach Transit",
+            timezone="America/Los_Angeles",
+            static_gtfs_url=settings.long_beach_static_gtfs_url,
+            vehicle_positions_url=settings.long_beach_vehicle_positions_url,
+            trip_updates_url=settings.long_beach_trip_updates_url,
+            requires_api_key=False,
+            api_key=None,
+            api_key_header="Authorization",
+        ),
+        "octa": Agency(
+            slug="octa",
+            region="orange-county",
+            name="OCTA",
+            timezone="America/Los_Angeles",
+            static_gtfs_url=settings.octa_static_gtfs_url,
+            vehicle_positions_url=settings.octa_vehicle_positions_url,
+            trip_updates_url=settings.octa_trip_updates_url,
+            requires_api_key=False,
+            api_key=None,
+            api_key_header="Authorization",
         ),
     }
 

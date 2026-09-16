@@ -4,16 +4,34 @@ from app.core.agencies import enabled_agencies, enabled_regions, find_agency, fi
 from app.core.config import Settings
 
 
-# By default Linecheck follows Boston (the MBTA) and Los Angeles (LA Metro bus and rail), each in
-# its own timezone.
+# By default Linecheck follows Boston (the MBTA), Los Angeles (LA Metro bus and rail plus the other
+# operators in the city), and Orange County (OCTA), each agency in its own timezone.
 def test_default_regions_and_agencies() -> None:
     settings = Settings(_env_file=None)
-    assert [region.slug for region in enabled_regions(settings)] == ["boston", "los-angeles"]
+    assert [region.slug for region in enabled_regions(settings)] == [
+        "boston",
+        "los-angeles",
+        "orange-county",
+    ]
     assert [(a.slug, a.region, a.timezone) for a in enabled_agencies(settings)] == [
         ("mbta", "boston", "America/New_York"),
         ("lametro-bus", "los-angeles", "America/Los_Angeles"),
         ("lametro-rail", "los-angeles", "America/Los_Angeles"),
+        ("ladot", "los-angeles", "America/Los_Angeles"),
+        ("longbeach", "los-angeles", "America/Los_Angeles"),
+        ("octa", "orange-county", "America/Los_Angeles"),
     ]
+
+
+# Only LA Metro's feeds need a key. Every other agency's live feeds are open, so they are ready to
+# poll with no configuration at all.
+def test_only_la_metro_needs_a_key() -> None:
+    settings = Settings(_env_file=None)
+    needs_key = [a.slug for a in enabled_agencies(settings) if a.requires_api_key]
+    assert needs_key == ["lametro-bus", "lametro-rail"]
+    assert all(
+        a.realtime_enabled for a in enabled_agencies(settings) if not a.requires_api_key
+    )
 
 
 # The MBTA's live feeds are open. LA Metro's need an API key, which is sent in the configured
@@ -36,6 +54,7 @@ def test_disabled_region_is_hidden() -> None:
     boston_only = Settings(_env_file=None, enabled_regions=["boston"])
     assert find_region(boston_only, "los-angeles") is None
     assert find_agency(boston_only, "lametro-rail") is None
+    assert find_agency(boston_only, "octa") is None
     assert find_agency(boston_only, "mbta") is not None
 
 

@@ -21,9 +21,10 @@ export function TermsPage() {
 
         <h2>Information only</h2>
         <p>
-          Delays, arrival times, and statistics on Linecheck are estimates calculated from public MBTA and LA
-          Metro data. They can be incomplete, delayed, or wrong, for example when an agency&apos;s feeds are
-          unavailable. Do not rely on Linecheck when timing matters; check official sources such as{' '}
+          Delays, arrival times, and statistics on Linecheck are estimates calculated from the public data of
+          the transit agencies it covers. They can be incomplete, delayed, or wrong, for example when an
+          agency&apos;s feeds are unavailable. Do not rely on Linecheck when timing matters; check official
+          sources such as{' '}
           <a href="https://www.mbta.com" target="_blank" rel="noreferrer">
             mbta.com
           </a>{' '}
@@ -47,12 +48,12 @@ export function TermsPage() {
           travel delays.
         </p>
 
-        <h2>Relationship to the MBTA and LA Metro</h2>
+        <h2>Relationship to the transit agencies</h2>
         <p>
-          Linecheck is not affiliated with or endorsed by the Massachusetts Bay Transportation Authority or the
-          Los Angeles County Metropolitan Transportation Authority. Line names and line colors are used only to
-          identify each agency&apos;s services. Transit data is provided by those agencies and is subject to their
-          own terms for developers, described at{' '}
+          Linecheck is not affiliated with or endorsed by the MBTA, LA Metro, LADOT Transit, Long Beach Transit
+          or OCTA. Line names and line colors are used only to identify each agency&apos;s
+          services. Transit data is provided by those agencies and is subject to their own terms for
+          developers, described at{' '}
           <a href="https://www.mbta.com/developers" target="_blank" rel="noreferrer">
             mbta.com/developers
           </a>{' '}

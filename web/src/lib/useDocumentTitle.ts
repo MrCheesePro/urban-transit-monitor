@@ -4,6 +4,8 @@ import { useEffect } from 'react'
 // the home page to use the full site title.
 export function useDocumentTitle(title: string | null) {
   useEffect(() => {
-    document.title = title ? `${title} | Linecheck` : 'Linecheck: MBTA and LA Metro line reliability'
+    document.title = title
+      ? `${title} | Linecheck`
+      : 'Linecheck: bus and rail reliability in Boston, LA and Orange County'
   }, [title])
 }

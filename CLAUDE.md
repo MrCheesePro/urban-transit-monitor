@@ -2,7 +2,7 @@
 
 Portfolio project. Polls GTFS-Realtime feeds (vehicle positions and trip updates) for two regions, Boston (MBTA) and Los Angeles (LA Metro bus and rail), matches them against each agency's static GTFS schedule to detect delays and headway gaps, aggregates hourly reliability metrics per route and direction, and serves them through a REST API. Full design, schema, and rationale are in [docs/DESIGN.md](docs/DESIGN.md). Read it only when a task needs details not covered here.
 
-**Status:** milestones M0 through M5 are done, plus the Linecheck website in `web/` and multi-agency support (Los Angeles). LA Metro live feeds need `LA_METRO_API_KEY` in `.env` (the owner adds it; never paste or commit the key). Open items are listed under "Open items" in docs/DESIGN.md.
+**Status:** milestones M0 through M5 are done, plus the Linecheck website in `web/` and multi-agency support (Los Angeles and Orange County). LA Metro live feeds need `LA_METRO_API_KEY` in `.env` (the owner adds it; never paste or commit the key); every other agency's feeds are open. Open items are listed under "Open items" in docs/DESIGN.md.
 
 ## Stack
 - Python 3.12, managed with `uv`
@@ -35,7 +35,7 @@ docker compose up --build                        # everything; website on :8080,
 ## Layout
 ```
 app/core/config.py     settings from env (enabled regions, feed URLs, LA Metro API key, on-time window, retention days)
-app/core/agencies.py   the agency and region registry (mbta; lametro-bus, lametro-rail) built from settings
+app/core/agencies.py   the agency and region registry (mbta; lametro-bus, lametro-rail, ladot, longbeach; octa) built from settings
 app/core/job_health.py rules for when a job counts as ok, failing, stale, never_run, or not_configured (/health)
 app/db/                models.py, session.py, partitions.py (daily vehicle_positions partitions)
 app/gtfs/              static_loader.py (GTFS zip), realtime.py (fetch + protobuf decode), realtime_ingest.py (poll_once)
@@ -54,7 +54,7 @@ web/nginx.conf         production routing: /api and /health to the api container
 
 ## Domain rules
 - GTFS ids (`route_id`, `trip_id`, `stop_id`, `vehicle_id`) are **text**, never integers.
-- Agencies: every table has an `agency` slug first in its primary key, and ids are only unique within an agency. Every query, upsert, delete, and API lookup must filter or key on agency. A region (`boston`, `los-angeles`) is what the website shows as a city and holds one or more agencies; API paths use `/regions/{region}` for city-wide views and `/agencies/{agency}/routes/{route_id}` for one route.
+- Agencies: every table has an `agency` slug first in its primary key, and ids are only unique within an agency. Every query, upsert, delete, and API lookup must filter or key on agency. A region (`boston`, `los-angeles`, `orange-county`) is what the website shows as a city and holds one or more agencies; API paths use `/regions/{region}` for city-wide views and `/agencies/{agency}/routes/{route_id}` for one route.
 - Schedule times are seconds after "noon minus 12h" on `service_date`, and can exceed 86400 (e.g. 25:10:00). Always carry `service_date` with them.
 - Local computations use the agency's own time zone (`Agency.timezone`: `America/New_York` for the MBTA, `America/Los_Angeles` for LA Metro); the global `TIMEZONE` setting is only for jobs that are not per agency. Every stored timestamp is `timestamptz` in UTC.
 - An agency whose feeds need a key (LA Metro) only gets live jobs scheduled when the key is set; without it `/health` reports those jobs as `not_configured` (not a failure) and API responses carry `realtime_configured: false`.

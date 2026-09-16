@@ -16,6 +16,14 @@ import { formatCount } from '@/lib/format'
 import { useRegionLive, useRegions } from '@/lib/queries'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
+// The operators of one city written as a sentence list, for example "LA Metro Bus, LA Metro Rail and
+// LADOT Transit". A city with a single operator is just its name.
+function agencyList(region: Region): string {
+  const names = region.agencies.map((agency) => agency.name)
+  if (names.length < 2) return names.join('')
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
 // One city on the home page: its name and agencies, how many vehicles are reporting right now and
 // how late they are (or a notice when its live feeds are not connected), and links into the city.
 function CityCard({ region }: { region: Region }) {
@@ -25,9 +33,7 @@ function CityCard({ region }: { region: Region }) {
   return (
     <section aria-labelledby={headingId} className="flex flex-col rounded-md border border-border bg-card p-5">
       <SectionTitle id={headingId}>{region.name}</SectionTitle>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {region.agencies.map((agency) => agency.name).join(' and ')}
-      </p>
+      <p className="mt-1 text-sm text-muted-foreground">{agencyList(region)}</p>
 
       <div className="mt-4 flex-1">
         {!region.realtime_configured ? (
@@ -80,11 +86,11 @@ export function HomePage() {
     <Container>
       <section className="border-b border-border py-10 lg:py-14">
         <h1 className="max-w-4xl font-display text-5xl font-bold uppercase leading-[0.95] tracking-wide sm:text-6xl">
-          Live and historical reliability for MBTA and LA Metro lines
+          Live and historical reliability for Boston, Los Angeles and Orange County bus and rail lines
         </h1>
         <p className="mt-5 max-w-2xl text-lg text-muted-foreground">
-          Linecheck compares where buses and trains in Boston and Los Angeles are against the published
-          timetable every minute, then shows which lines run on time and at what hours they fall behind.
+          Linecheck compares where buses and trains are against the published timetable every minute,
+          then shows which lines run on time and at what hours they fall behind.
         </p>
       </section>
 

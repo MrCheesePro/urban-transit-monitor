@@ -7,6 +7,7 @@ import type { Region } from '@/lib/api'
 const REGION_DETAILS: Record<string, { center: [number, number]; searchExample: string }> = {
   boston: { center: [42.3601, -71.0589], searchExample: 'Red Line, 39, Fitchburg' },
   'los-angeles': { center: [34.0522, -118.2437], searchExample: 'A Line, 720, Dodger' },
+  'orange-county': { center: [33.7175, -117.8311], searchExample: '1, 143, 167' },
 }
 
 const FALLBACK_DETAILS = { center: [39.5, -98.35] as [number, number], searchExample: 'Line name or number' }

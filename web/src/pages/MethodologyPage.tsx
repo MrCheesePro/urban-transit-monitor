@@ -17,20 +17,21 @@ export function MethodologyPage() {
       <Prose>
         <h2>Where the data comes from</h2>
         <p>
-          Linecheck covers two cities: Boston, run by the MBTA, and Los Angeles, run by LA Metro. Each agency
-          publishes two kinds of data. The <strong>timetable</strong> (GTFS) lists every trip and the time it
-          is scheduled at each stop. The <strong>live feeds</strong> (GTFS-Realtime) report where each vehicle
-          is and when it is predicted to reach its upcoming stops.
+          Linecheck covers three places: Boston, run by the MBTA; Los Angeles, where LA Metro bus and rail run
+          alongside LADOT Transit and Long Beach Transit; and Orange County, run by OCTA. Each
+          agency publishes two kinds of data. The <strong>timetable</strong> (GTFS) lists every trip and the
+          time it is scheduled at each stop. The <strong>live feeds</strong> (GTFS-Realtime) report where each
+          vehicle is and when it is predicted to reach its upcoming stops.
         </p>
         <p>
-          The MBTA&apos;s timetable and live feeds are open to everyone. LA Metro publishes its buses and its
-          trains as two separate timetables, which are open, while its live feeds are served through an API
-          that needs a key. Until a key is configured, Los Angeles shows lines and timetables but no live
-          vehicles, delays, or statistics.
+          Every agency&apos;s timetable is open, and so are the live feeds of all of them except LA Metro, whose
+          live feeds are served through an API that needs a key. Until that key is configured, LA Metro bus and
+          rail lines show timetables but no live vehicles, delays or statistics, while the other Los Angeles
+          operators are unaffected.
         </p>
         <p>
-          Every agency is processed on its own and in its own time zone, so hours and days for Los Angeles are
-          Pacific time and for Boston are Eastern time.
+          Every agency is processed on its own and in its own time zone, so hours and days for Los Angeles and
+          Orange County are Pacific time and for Boston are Eastern time.
         </p>
 
         <h2>How the data is processed</h2>

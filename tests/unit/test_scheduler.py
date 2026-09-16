@@ -13,6 +13,9 @@ def test_static_jobs_run_in_each_agency_timezone() -> None:
         ("mbta", "America/New_York"),
         ("lametro-bus", "America/Los_Angeles"),
         ("lametro-rail", "America/Los_Angeles"),
+        ("ladot", "America/Los_Angeles"),
+        ("longbeach", "America/Los_Angeles"),
+        ("octa", "America/Los_Angeles"),
     ):
         job = scheduler.get_job(job_id("load_static_gtfs", slug))
         assert job is not None
@@ -32,10 +35,13 @@ def test_live_job_timetables() -> None:
     assert aggregate is not None and "minute='15'" in str(aggregate.trigger)
 
 
-# LA Metro's live jobs are only scheduled once its API key is configured.
+# LA Metro's live jobs are only scheduled once its API key is configured. The other agencies in the
+# same city have open feeds, so their live jobs run whether or not that key is set.
 def test_la_live_jobs_need_api_key() -> None:
     assert build_scheduler(NO_KEY).get_job(job_id("poll_realtime", "lametro-bus")) is None
     assert build_scheduler(WITH_KEY).get_job(job_id("poll_realtime", "lametro-bus")) is not None
+    for slug in ("ladot", "longbeach", "octa"):
+        assert build_scheduler(NO_KEY).get_job(job_id("poll_realtime", slug)) is not None
 
 
 # Retention runs once for every agency, and exactly the jobs /health expects to run are scheduled,
