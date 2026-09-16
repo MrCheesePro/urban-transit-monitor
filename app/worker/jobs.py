@@ -8,7 +8,7 @@ from app.core.agencies import Agency, find_agency
 from app.core.config import Settings, get_settings
 from app.core.job_health import job_id
 from app.db.session import get_engine
-from app.gtfs import realtime, realtime_ingest, static_loader
+from app.gtfs import alerts_ingest, realtime, realtime_ingest, static_loader
 from app.pipeline import aggregate, retention, stop_events
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,26 @@ def poll_realtime_job(agency_slug: str) -> JobStatus:
         engine,
         "poll_realtime",
         lambda: realtime_ingest.poll_once(engine, agency, fetch).vehicles,
+        agency=agency_slug,
+    )
+
+
+# Scheduled job (every ALERTS_POLL_INTERVAL_SECONDS): download one agency's service alerts and
+# replace the stored set with them. Records the number of alerts stored.
+def poll_alerts_job(agency_slug: str) -> JobStatus:
+    engine = get_engine()
+    settings = get_settings()
+    agency = _agency(settings, agency_slug)
+    headers = agency.realtime_headers()
+
+    # Download the alerts feed with the agency's API key header (if any), on the realtime timeout.
+    def fetch(url: str) -> bytes:
+        return realtime.fetch_feed_bytes(url, settings.realtime_http_timeout_seconds, headers)
+
+    return run_job(
+        engine,
+        "poll_alerts",
+        lambda: alerts_ingest.poll_alerts_once(engine, agency, fetch).alerts,
         agency=agency_slug,
     )
 

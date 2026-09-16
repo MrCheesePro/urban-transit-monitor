@@ -42,6 +42,7 @@ class Agency:
     static_gtfs_url: str
     vehicle_positions_url: str
     trip_updates_url: str
+    alerts_url: str
     requires_api_key: bool
     api_key: str | None
     api_key_header: str
@@ -110,6 +111,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             static_gtfs_url=settings.mbta_static_gtfs_url,
             vehicle_positions_url=settings.mbta_vehicle_positions_url,
             trip_updates_url=settings.mbta_trip_updates_url,
+            alerts_url=settings.mbta_alerts_url,
             requires_api_key=False,
             api_key=None,
             api_key_header="Authorization",
@@ -122,6 +124,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             static_gtfs_url=settings.la_metro_bus_static_gtfs_url,
             vehicle_positions_url=settings.la_metro_bus_vehicle_positions_url,
             trip_updates_url=settings.la_metro_bus_trip_updates_url,
+            alerts_url=settings.la_metro_bus_alerts_url,
             requires_api_key=True,
             api_key=settings.la_metro_api_key,
             api_key_header=settings.la_metro_api_key_header,
@@ -134,6 +137,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             static_gtfs_url=settings.la_metro_rail_static_gtfs_url,
             vehicle_positions_url=settings.la_metro_rail_vehicle_positions_url,
             trip_updates_url=settings.la_metro_rail_trip_updates_url,
+            alerts_url=settings.la_metro_rail_alerts_url,
             requires_api_key=True,
             api_key=settings.la_metro_api_key,
             api_key_header=settings.la_metro_api_key_header,
@@ -146,6 +150,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             static_gtfs_url=settings.ladot_static_gtfs_url,
             vehicle_positions_url=settings.ladot_vehicle_positions_url,
             trip_updates_url=settings.ladot_trip_updates_url,
+            alerts_url=settings.ladot_alerts_url,
             requires_api_key=False,
             api_key=None,
             api_key_header="Authorization",
@@ -158,6 +163,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             static_gtfs_url=settings.long_beach_static_gtfs_url,
             vehicle_positions_url=settings.long_beach_vehicle_positions_url,
             trip_updates_url=settings.long_beach_trip_updates_url,
+            alerts_url=settings.long_beach_alerts_url,
             requires_api_key=False,
             api_key=None,
             api_key_header="Authorization",
@@ -170,6 +176,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             static_gtfs_url=settings.torrance_static_gtfs_url,
             vehicle_positions_url=settings.torrance_vehicle_positions_url,
             trip_updates_url=settings.torrance_trip_updates_url,
+            alerts_url=settings.torrance_alerts_url,
             requires_api_key=False,
             api_key=None,
             api_key_header="Authorization",
@@ -183,6 +190,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
             static_gtfs_url=settings.octa_static_gtfs_url,
             vehicle_positions_url=settings.octa_vehicle_positions_url,
             trip_updates_url=settings.octa_trip_updates_url,
+            alerts_url=settings.octa_alerts_url,
             requires_api_key=False,
             api_key=None,
             api_key_header="Authorization",

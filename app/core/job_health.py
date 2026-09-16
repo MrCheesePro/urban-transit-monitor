@@ -13,7 +13,7 @@ from app.core.config import Settings
 JobState = Literal["ok", "failing", "stale", "never_run", "not_configured"]
 
 # Jobs that need an agency's live feeds, in the order /health lists them for each agency.
-REALTIME_JOBS = ("poll_realtime", "derive_stop_events", "aggregate_hourly")
+REALTIME_JOBS = ("poll_realtime", "poll_alerts", "derive_stop_events", "aggregate_hourly")
 
 
 # The name a job runs under: the job alone for global jobs ("retention"), or job and agency joined
@@ -63,6 +63,7 @@ class JobHealth:
 def job_max_ages(settings: Settings) -> dict[str, int]:
     return {
         "poll_realtime": 3 * settings.poll_interval_seconds,
+        "poll_alerts": 3 * settings.alerts_poll_interval_seconds,
         "derive_stop_events": 3 * settings.stop_events_interval_seconds,
         "aggregate_hourly": 2 * 3600 + 15 * 60,
         "load_static_gtfs": 26 * 3600,

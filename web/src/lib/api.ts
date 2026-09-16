@@ -156,6 +156,25 @@ export interface Rankings {
   routes: RankedRoute[]
 }
 
+export interface ServiceAlert {
+  agency: string
+  alert_id: string
+  cause: string | null
+  effect: string | null
+  severity_level: string | null
+  header: string | null
+  description: string | null
+  url: string | null
+  starts_at: string | null
+  ends_at: string | null
+  routes: string[]
+}
+
+export interface Alerts {
+  as_of: string
+  alerts: ServiceAlert[]
+}
+
 export interface JobHealth {
   job: string
   agency: string | null
@@ -276,6 +295,14 @@ export const api = {
       route_type: params.routeType,
       limit: params.limit,
     }),
+
+  // Alerts in force right now across one city's agencies.
+  regionAlerts: (region: string) =>
+    getJson<Alerts>(`/api/v1/regions/${encodeURIComponent(region)}/alerts`),
+
+  // Alerts in force right now affecting one line, including the agency's service-wide ones.
+  routeAlerts: (agency: string, routeId: string) =>
+    getJson<Alerts>(`${routePath(agency, routeId)}/alerts`),
 
   // Database and background job health.
   health: () => getJson<Health>('/health'),

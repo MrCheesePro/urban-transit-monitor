@@ -136,7 +136,8 @@ def _previous_header(conn: Connection, agency: str, feed: str) -> dt.datetime | 
 
 
 # Save one agency's latest header timestamp and entity count for a feed, inserting or updating.
-def _save_feed_state(
+# Shared with the alerts poller, which records its own feed the same way.
+def save_feed_state(
     conn: Connection, agency: str, feed: str, header: dt.datetime | None, entity_count: int
 ) -> None:
     statement = insert(RealtimeFeedState).values(
@@ -218,11 +219,11 @@ def poll_once(engine: Engine, agency: Agency, fetch: Fetcher) -> PollResult:
         if rows:
             _store_vehicles(conn, rows)
 
-        _save_feed_state(
+        save_feed_state(
             conn, agency.slug, rt.VEHICLE_POSITIONS_FEED, header, len(vehicle_message.entity)
         )
         if trip_message is not None:
-            _save_feed_state(
+            save_feed_state(
                 conn,
                 agency.slug,
                 rt.TRIP_UPDATES_FEED,

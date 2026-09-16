@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Boston (MBTA). All feeds are open and need no key.
     mbta_vehicle_positions_url: str = "https://cdn.mbta.com/realtime/VehiclePositions.pb"
     mbta_trip_updates_url: str = "https://cdn.mbta.com/realtime/TripUpdates.pb"
+    mbta_alerts_url: str = "https://cdn.mbta.com/realtime/Alerts.pb"
     mbta_static_gtfs_url: str = "https://cdn.mbta.com/MBTA_GTFS.zip"
 
     # Los Angeles (LA Metro). Timetables are open. The live feeds need an API key from LA Metro's
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     la_metro_bus_trip_updates_url: str = (
         "https://api.goswift.ly/real-time/lametro/gtfs-rt-trip-updates"
     )
+    la_metro_bus_alerts_url: str = "https://api.goswift.ly/real-time/lametro/gtfs-rt-alerts"
     la_metro_rail_static_gtfs_url: str = (
         "https://gitlab.com/LACMTA/gtfs_rail/-/raw/master/gtfs_rail.zip"
     )
@@ -44,6 +46,7 @@ class Settings(BaseSettings):
     la_metro_rail_trip_updates_url: str = (
         "https://api.goswift.ly/real-time/lametro-rail/gtfs-rt-trip-updates"
     )
+    la_metro_rail_alerts_url: str = "https://api.goswift.ly/real-time/lametro-rail/gtfs-rt-alerts"
 
     # The other Los Angeles area operators. Unlike LA Metro, all of these publish open timetables
     # and open live feeds, so they need no key and run as soon as the region is switched on.
@@ -51,6 +54,7 @@ class Settings(BaseSettings):
     ladot_static_gtfs_url: str = "https://ladotbus.com/gtfs"
     ladot_vehicle_positions_url: str = "https://ladotbus.com/gtfs-rt/vehiclepositions"
     ladot_trip_updates_url: str = "https://ladotbus.com/gtfs-rt/tripupdates"
+    ladot_alerts_url: str = "https://ladotbus.com/gtfs-rt/alerts"
     # Long Beach Transit. Its timetable is hosted for it by National RTAP.
     long_beach_static_gtfs_url: str = (
         "https://rapid.nationalrtap.org/GTFSFileManagement/UserUploadFiles/14866/google_transit.zip"
@@ -61,6 +65,9 @@ class Settings(BaseSettings):
     long_beach_trip_updates_url: str = (
         "https://gtfs-rt.lbt.vontascloud.com/TMGTFSRealTimeWebService/TripUpdate/TripUpdates.pb"
     )
+    long_beach_alerts_url: str = (
+        "https://gtfs-rt.lbt.vontascloud.com/TMGTFSRealTimeWebService/Alert/Alerts.pb"
+    )
 
     # Torrance Transit. Open feeds, no key. Its live feeds come from the BusTime portal the city
     # runs, and its timetable host only answers requests that look like a browser (see
@@ -68,6 +75,7 @@ class Settings(BaseSettings):
     torrance_static_gtfs_url: str = "https://transit.torranceca.gov/gtfs_feed"
     torrance_vehicle_positions_url: str = "https://www.mybusinfo.com/gtfsrt/vehicles"
     torrance_trip_updates_url: str = "https://www.mybusinfo.com/gtfsrt/trips"
+    torrance_alerts_url: str = "https://www.mybusinfo.com/gtfsrt/alerts"
 
     # Orange County (OCTA). Open timetable and open live feeds, no key.
     octa_static_gtfs_url: str = "https://www.octa.net/current/google_transit.zip"
@@ -75,11 +83,15 @@ class Settings(BaseSettings):
         "https://api.octa.net/GTFSRealTime/protoBuf/VehiclePositions.aspx"
     )
     octa_trip_updates_url: str = "https://api.octa.net/GTFSRealTime/protoBuf/tripupdates.aspx"
+    octa_alerts_url: str = "https://api.octa.net/GTFSRealTime/protoBuf/ServiceAlerts.aspx"
 
     http_timeout_seconds: float = 60.0
     realtime_http_timeout_seconds: float = 15.0
 
     poll_interval_seconds: int = 60
+    # Service alerts are written by hand by agency staff and change far more slowly than vehicle
+    # positions, so they are polled once every few minutes rather than every minute.
+    alerts_poll_interval_seconds: int = 300
     on_time_early_seconds: int = -60
     on_time_late_seconds: int = 300
     severity_major_seconds: int = 600

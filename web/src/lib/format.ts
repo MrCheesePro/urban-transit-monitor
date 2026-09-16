@@ -43,6 +43,43 @@ export const SEVERITY_HEX: Record<Severity, string> = {
   unknown: '#8a918e',
 }
 
+// GTFS-Realtime alert causes in plain English. Codes an agency leaves as unknown are not listed,
+// because "unknown cause" tells a reader nothing worth a line on screen.
+const ALERT_CAUSES: Record<string, string> = {
+  ACCIDENT: 'Crash',
+  CONSTRUCTION: 'Construction',
+  DEMONSTRATION: 'Demonstration',
+  HOLIDAY: 'Holiday',
+  MAINTENANCE: 'Maintenance',
+  MEDICAL_EMERGENCY: 'Medical emergency',
+  POLICE_ACTIVITY: 'Police activity',
+  STRIKE: 'Strike',
+  TECHNICAL_PROBLEM: 'Technical problem',
+  WEATHER: 'Weather',
+}
+
+// GTFS-Realtime alert effects in plain English, for example what the alert does to service.
+const ALERT_EFFECTS: Record<string, string> = {
+  ACCESSIBILITY_ISSUE: 'Accessibility issue',
+  ADDITIONAL_SERVICE: 'Extra service',
+  DETOUR: 'Detour',
+  MODIFIED_SERVICE: 'Changed service',
+  NO_SERVICE: 'No service',
+  REDUCED_SERVICE: 'Reduced service',
+  SIGNIFICANT_DELAYS: 'Significant delays',
+  STOP_MOVED: 'Stop moved',
+}
+
+// The cause of an alert in plain English, or null when the agency did not give a usable one.
+export function alertCause(cause: string | null | undefined): string | null {
+  return cause ? (ALERT_CAUSES[cause] ?? null) : null
+}
+
+// What an alert does to service, in plain English, or null when the agency did not say.
+export function alertEffect(effect: string | null | undefined): string | null {
+  return effect ? (ALERT_EFFECTS[effect] ?? null) : null
+}
+
 // Name of a mode of transport from its GTFS route_type, for example 3 gives "Bus".
 export function modeName(routeType: number | null | undefined): string {
   if (routeType === null || routeType === undefined) return 'Other service'

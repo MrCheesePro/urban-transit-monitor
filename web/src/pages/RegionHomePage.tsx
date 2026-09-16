@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 
+import { AlertsPanel } from '@/components/AlertsPanel'
 import {
   Container,
   EmptyPanel,
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { RankedRoute, Region, Route } from '@/lib/api'
 import { describeDelay, formatCount, formatPercent, modeName, routeName } from '@/lib/format'
-import { routeKey, useRankings, useRegionLive, useRouteLookup } from '@/lib/queries'
+import { routeKey, useRankings, useRegionAlerts, useRegionLive, useRouteLookup } from '@/lib/queries'
 import { linePath, useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
@@ -77,6 +78,7 @@ export function RegionHomePage() {
     connected,
   )
   const lookup = useRouteLookup(region.slug)
+  const alerts = useRegionAlerts(region.slug)
   const ranked = rankings.data?.routes ?? []
   const mostReliable = ranked.slice(0, 5)
   const leastReliable = ranked.length > 5 ? ranked.slice(-5).reverse() : []
@@ -134,6 +136,22 @@ export function RegionHomePage() {
             )}
           </div>
         </section>
+      </section>
+
+      <section aria-labelledby="service-news" className="border-b border-border py-10">
+        <SectionTitle id="service-news">Service news</SectionTitle>
+        <p className="mb-4 mt-1 text-sm text-muted-foreground">
+          What {region.name} operators say is happening on their lines right now, in their own words.
+        </p>
+        <AlertsPanel query={alerts} region={region} lookup={lookup} limit={4} />
+        <p className="mt-5">
+          <Link
+            to={`/${region.slug}/service-news`}
+            className="font-medium underline underline-offset-4"
+          >
+            All {region.name} service news
+          </Link>
+        </p>
       </section>
 
       {connected ? (

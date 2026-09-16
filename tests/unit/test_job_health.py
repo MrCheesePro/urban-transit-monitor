@@ -78,37 +78,15 @@ def test_job_max_ages_and_ids() -> None:
 # live jobs only count as configured once an API key is set; its timetable job always does.
 def test_expected_jobs_per_agency() -> None:
     without_key = [(e.job, e.agency, e.configured) for e in expected_jobs(NO_KEY)]
-    assert without_key == [
-        ("poll_realtime", "mbta", True),
-        ("derive_stop_events", "mbta", True),
-        ("aggregate_hourly", "mbta", True),
-        ("load_static_gtfs", "mbta", True),
-        ("poll_realtime", "lametro-bus", False),
-        ("derive_stop_events", "lametro-bus", False),
-        ("aggregate_hourly", "lametro-bus", False),
-        ("load_static_gtfs", "lametro-bus", True),
-        ("poll_realtime", "lametro-rail", False),
-        ("derive_stop_events", "lametro-rail", False),
-        ("aggregate_hourly", "lametro-rail", False),
-        ("load_static_gtfs", "lametro-rail", True),
-        ("poll_realtime", "ladot", True),
-        ("derive_stop_events", "ladot", True),
-        ("aggregate_hourly", "ladot", True),
-        ("load_static_gtfs", "ladot", True),
-        ("poll_realtime", "longbeach", True),
-        ("derive_stop_events", "longbeach", True),
-        ("aggregate_hourly", "longbeach", True),
-        ("load_static_gtfs", "longbeach", True),
-        ("poll_realtime", "torrance", True),
-        ("derive_stop_events", "torrance", True),
-        ("aggregate_hourly", "torrance", True),
-        ("load_static_gtfs", "torrance", True),
-        ("poll_realtime", "octa", True),
-        ("derive_stop_events", "octa", True),
-        ("aggregate_hourly", "octa", True),
-        ("load_static_gtfs", "octa", True),
-        ("retention", None, True),
-    ]
+    open_feeds = ("mbta", "ladot", "longbeach", "torrance", "octa")
+    expected: list[tuple[str, str | None, bool]] = []
+    for slug in ("mbta", "lametro-bus", "lametro-rail", "ladot", "longbeach", "torrance", "octa"):
+        live = slug in open_feeds
+        for job in ("poll_realtime", "poll_alerts", "derive_stop_events", "aggregate_hourly"):
+            expected.append((job, slug, live))
+        expected.append(("load_static_gtfs", slug, True))
+    expected.append(("retention", None, True))
+    assert without_key == expected
     assert all(expected.configured for expected in expected_jobs(WITH_KEY))
 
 

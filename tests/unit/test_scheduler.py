@@ -29,9 +29,11 @@ def test_static_jobs_run_in_each_agency_timezone() -> None:
 def test_live_job_timetables() -> None:
     scheduler = build_scheduler(NO_KEY)
     poll = scheduler.get_job(job_id("poll_realtime", "mbta"))
+    alerts = scheduler.get_job(job_id("poll_alerts", "mbta"))
     derive = scheduler.get_job(job_id("derive_stop_events", "mbta"))
     aggregate = scheduler.get_job(job_id("aggregate_hourly", "mbta"))
     assert poll is not None and "0:01:00" in str(poll.trigger)
+    assert alerts is not None and "0:05:00" in str(alerts.trigger)
     assert derive is not None and "0:05:00" in str(derive.trigger)
     assert aggregate is not None and "minute='15'" in str(aggregate.trigger)
 

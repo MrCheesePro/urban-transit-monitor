@@ -94,6 +94,11 @@ function SiteHeader() {
                     Rankings
                   </NavLink>
                 </li>
+                <li>
+                  <NavLink to={`/${target}/service-news`} className={navClass}>
+                    Service news
+                  </NavLink>
+                </li>
               </>
             ) : null}
             <li>

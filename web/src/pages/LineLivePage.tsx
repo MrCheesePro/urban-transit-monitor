@@ -12,6 +12,7 @@ import {
   SeverityBadge,
   StatTile,
 } from '@/components/common'
+import { AlertsPanel } from '@/components/AlertsPanel'
 import { LineHeader, LineNotFound } from '@/components/LineHeader'
 import { Label } from '@/components/ui/label'
 import {
@@ -32,7 +33,7 @@ import {
   secondsSince,
   signedDelay,
 } from '@/lib/format'
-import { useLiveRoute, useRegionRoutes } from '@/lib/queries'
+import { useLiveRoute, useRegionRoutes, useRouteAlerts, useRouteLookup } from '@/lib/queries'
 import { regionCenter, useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
@@ -67,6 +68,8 @@ export function LineLivePage() {
   )
   const [direction, setDirection] = useState<DirectionChoice>('both')
   const live = useLiveRoute(agency, routeId, direction === 'both' ? undefined : Number(direction))
+  const alerts = useRouteAlerts(agency, routeId)
+  const lookup = useRouteLookup(region.slug)
   useDocumentTitle(route ? `${routeName(route)} live` : 'Line')
 
   if (routes.data && !route) return <LineNotFound region={region} routeId={routeId} />
@@ -103,6 +106,20 @@ export function LineLivePage() {
           ) : null}
         </div>
       ) : null}
+
+      <section aria-labelledby="line-alerts" className="mt-8">
+        <SectionTitle id="line-alerts">Service news</SectionTitle>
+        <p className="mb-3 mt-1 text-sm text-muted-foreground">
+          What the agency says about this line right now, in its own words.
+        </p>
+        <AlertsPanel
+          query={alerts}
+          region={region}
+          lookup={lookup}
+          showRoutes={false}
+          emptyTitle="No service alerts for this line right now."
+        />
+      </section>
 
       <div className="mt-6">
         {live.isPending ? (

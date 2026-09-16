@@ -16,6 +16,11 @@ from app.gtfs.parsing import parse_gtfs_date
 
 VEHICLE_POSITIONS_FEED = "vehicle_positions"
 TRIP_UPDATES_FEED = "trip_updates"
+SERVICE_ALERTS_FEED = "service_alerts"
+
+# Languages to prefer when an agency publishes an alert in several (the MBTA publishes eight).
+# An empty language code means the agency did not label the text at all, which most of them do.
+_PREFERRED_LANGUAGES = ("en", "")
 
 _SKIPPED = gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.SKIPPED
 
@@ -60,6 +65,31 @@ class TripPrediction:
     service_date: dt.date | None
     schedule_relationship: str | None
     stops: tuple[StopPrediction, ...]
+
+
+# One period during which an alert applies. Either end can be missing: no start means "already in
+# effect", and no end means "until further notice". An alert with no period at all gets a single
+# period with both ends missing, so "is it active now" is one rule for every alert.
+@dataclass(frozen=True)
+class AlertPeriod:
+    starts_at: dt.datetime | None
+    ends_at: dt.datetime | None
+
+
+# One service alert: what the agency says is happening, why, and which routes it affects. cause and
+# effect are GTFS-Realtime enum names such as "ACCIDENT" or "SIGNIFICANT_DELAYS". route_ids can be
+# empty for an alert that covers a whole agency rather than particular lines.
+@dataclass(frozen=True)
+class ServiceAlert:
+    alert_id: str
+    cause: str | None
+    effect: str | None
+    severity_level: str | None
+    header: str | None
+    description: str | None
+    url: str | None
+    periods: tuple[AlertPeriod, ...]
+    route_ids: tuple[str, ...]
 
 
 # Download one feed and return its raw bytes, sending any extra headers (such as an API key).
@@ -161,6 +191,58 @@ def parse_vehicle_positions(message: Any) -> list[VehicleObservation]:
             )
         )
     return observations
+
+
+# Pick one language out of a translated string, preferring English, then an unlabelled translation,
+# then whatever came first. Returns None when the agency left the field out entirely.
+def _translated(field: Any) -> str | None:
+    translations = list(field.translation)
+    if not translations:
+        return None
+    for language in _PREFERRED_LANGUAGES:
+        for translation in translations:
+            if translation.language == language:
+                return translation.text or None
+    return translations[0].text or None
+
+
+# Turn an Alerts feed into one ServiceAlert per entity. Entities without an id are skipped (there
+# would be no stable way to recognise the same alert on the next poll). An alert that names no
+# period is given one open-ended period, so it counts as active until the agency withdraws it.
+def parse_service_alerts(message: Any) -> list[ServiceAlert]:
+    alerts: list[ServiceAlert] = []
+    for entity in message.entity:
+        if not entity.HasField("alert") or not entity.id:
+            continue
+        alert = entity.alert
+        periods = tuple(
+            AlertPeriod(
+                starts_at=_from_posix(period.start) if period.HasField("start") else None,
+                ends_at=_from_posix(period.end) if period.HasField("end") else None,
+            )
+            for period in alert.active_period
+        )
+        route_ids = tuple(
+            dict.fromkeys(
+                informed.route_id for informed in alert.informed_entity if informed.route_id
+            )
+        )
+        alerts.append(
+            ServiceAlert(
+                alert_id=entity.id,
+                cause=_enum_name(gtfs_realtime_pb2.Alert.Cause, alert, "cause"),
+                effect=_enum_name(gtfs_realtime_pb2.Alert.Effect, alert, "effect"),
+                severity_level=_enum_name(
+                    gtfs_realtime_pb2.Alert.SeverityLevel, alert, "severity_level"
+                ),
+                header=_translated(alert.header_text),
+                description=_translated(alert.description_text),
+                url=_translated(alert.url),
+                periods=periods or (AlertPeriod(None, None),),
+                route_ids=route_ids,
+            )
+        )
+    return alerts
 
 
 # Read one stop's predicted arrival or departure time (None when not given).

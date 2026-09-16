@@ -75,6 +75,25 @@ export function useRankings(region: string, params: RankingsParams, enabled = tr
   })
 }
 
+// Alerts in force in one city. Agencies write these by hand, so they are polled far less often than
+// vehicles: every two minutes is plenty and keeps the page from hammering the API.
+export function useRegionAlerts(region: string) {
+  return useQuery({
+    queryKey: ['region-alerts', region],
+    queryFn: () => api.regionAlerts(region),
+    refetchInterval: 2 * 60 * 1000,
+  })
+}
+
+// Alerts in force on one line, including the agency's service-wide ones.
+export function useRouteAlerts(agency: string, routeId: string) {
+  return useQuery({
+    queryKey: ['route-alerts', agency, routeId],
+    queryFn: () => api.routeAlerts(agency, routeId),
+    refetchInterval: 2 * 60 * 1000,
+  })
+}
+
 // Service health, refreshed every LIVE_REFRESH_MS.
 export function useHealth() {
   return useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: LIVE_REFRESH_MS })

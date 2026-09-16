@@ -59,6 +59,19 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
             misfire_grace_time=settings.poll_interval_seconds,
         )
 
+        # Service alerts: every ALERTS_POLL_INTERVAL_SECONDS, starting right away so a fresh worker
+        # can explain delays from its first minutes.
+        scheduler.add_job(
+            jobs.poll_alerts_job,
+            IntervalTrigger(seconds=settings.alerts_poll_interval_seconds, timezone=timezone),
+            args=[agency.slug],
+            id=job_id("poll_alerts", agency.slug),
+            next_run_time=now,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=settings.alerts_poll_interval_seconds,
+        )
+
         # Stop arrivals and headways: every STOP_EVENTS_INTERVAL_SECONDS. The first run waits one
         # interval so a fresh worker has collected a few polls before deriving anything.
         scheduler.add_job(

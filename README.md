@@ -94,6 +94,8 @@ A region is a city (`boston`, `los-angeles`); an agency is one timetable and set
 | `GET /api/v1/regions/{region}/rankings` | The city's routes ordered from most to least reliable by `on_time`, `delay`, or `headway`, with `days`, `min_samples`, `route_type`, and `limit` filters. |
 | `GET /api/v1/agencies/{agency}/routes/{route_id}/live` | Vehicles currently on the route with estimated delay, severity, and stop name, a route summary, and data age. |
 | `GET /api/v1/agencies/{agency}/routes/{route_id}/historical` | All 168 cells of a local day-of-week by hour-of-day grid, plus a period summary. Optional `direction_id`, `start_date`, `end_date`. |
+| `GET /api/v1/regions/{region}/alerts` | Service alerts the city's agencies have in force right now, newest first, with each alert's cause, effect, text, and affected lines. |
+| `GET /api/v1/agencies/{agency}/routes/{route_id}/alerts` | Alerts in force now affecting one line, including the agency's service-wide ones. |
 | `GET /health` | Database status and the state of every background job per agency (ok, failing, stale, never_run, or not_configured when an API key is missing). |
 
 Interactive documentation is served at `http://localhost:8000/docs`.

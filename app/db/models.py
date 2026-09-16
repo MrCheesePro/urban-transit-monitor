@@ -309,6 +309,61 @@ class RouteHourlyPerformance(Base):
     )
 
 
+# One service alert published by an agency: what is happening and why, in the agency's own words.
+# cause and effect are GTFS-Realtime enum names ("ACCIDENT", "SIGNIFICANT_DELAYS"), which is what
+# lets the site say why a line is delayed instead of only that it is. The poll_alerts job replaces
+# one agency's rows on every run, so withdrawn alerts disappear by themselves.
+class ServiceAlert(Base):
+    __tablename__ = "service_alerts"
+    __table_args__ = (PrimaryKeyConstraint("agency", "alert_id", name="pk_service_alerts"),)
+
+    agency: Mapped[str]
+    alert_id: Mapped[str]
+    cause: Mapped[str | None]
+    effect: Mapped[str | None]
+    severity_level: Mapped[str | None]
+    header: Mapped[str | None]
+    description: Mapped[str | None]
+    url: Mapped[str | None]
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# One window during which an alert applies. An alert can have many (the MBTA publishes hundreds for
+# recurring weekend work), so they live in their own table and "active now" is a query rather than a
+# stored flag that would go stale between polls. A null start means already in effect, and a null
+# end means until further notice.
+class ServiceAlertPeriod(Base):
+    __tablename__ = "service_alert_periods"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "agency", "alert_id", "period_index", name="pk_service_alert_periods"
+        ),
+        Index("ix_service_alert_periods_agency_starts_ends", "agency", "starts_at", "ends_at"),
+    )
+
+    agency: Mapped[str]
+    alert_id: Mapped[str]
+    period_index: Mapped[int] = mapped_column(Integer)
+    starts_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Which routes an alert names. An alert that covers a whole agency has no rows here, so a line page
+# shows only alerts naming that line while the city page shows every alert.
+class ServiceAlertRoute(Base):
+    __tablename__ = "service_alert_routes"
+    __table_args__ = (
+        PrimaryKeyConstraint("agency", "alert_id", "route_id", name="pk_service_alert_routes"),
+        Index("ix_service_alert_routes_agency_route_id", "agency", "route_id"),
+    )
+
+    agency: Mapped[str]
+    alert_id: Mapped[str]
+    route_id: Mapped[str]
+
+
 # Last snapshot seen from each agency's realtime feeds ("vehicle_positions", "trip_updates"). Used
 # to skip a poll when the agency has not published anything new, and to report data age.
 class RealtimeFeedState(Base):

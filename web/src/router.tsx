@@ -2,6 +2,7 @@ import { createBrowserRouter } from 'react-router-dom'
 
 import { RegionLayout } from '@/components/layout/RegionLayout'
 import { SiteLayout } from '@/components/layout/SiteLayout'
+import { AlertsPage } from '@/pages/AlertsPage'
 import { HomePage } from '@/pages/HomePage'
 import { LineHistoryPage } from '@/pages/LineHistoryPage'
 import { LineLivePage } from '@/pages/LineLivePage'
@@ -36,6 +37,7 @@ export const router = createBrowserRouter([
           { path: 'lines/:agency/:routeId', element: <LineLivePage /> },
           { path: 'lines/:agency/:routeId/history', element: <LineHistoryPage /> },
           { path: 'rankings', element: <RankingsPage /> },
+          { path: 'service-news', element: <AlertsPage /> },
           { path: '*', element: <NotFoundPage /> },
         ],
       },

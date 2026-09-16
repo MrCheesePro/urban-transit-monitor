@@ -90,7 +90,8 @@ def clean_realtime(engine: Engine) -> None:
         conn.execute(
             text(
                 "TRUNCATE vehicle_positions, vehicle_latest, realtime_feed_state, stop_events, "
-                "route_hourly_performance"
+                "route_hourly_performance, service_alerts, service_alert_periods, "
+                "service_alert_routes"
             )
         )
 
