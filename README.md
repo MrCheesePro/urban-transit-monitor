@@ -1,6 +1,6 @@
 # Linecheck: Urban Public Transit Reliability & Delay Monitor
 
-A backend service and website that watch live vehicle feeds for three places, Boston (MBTA), Los Angeles (LA Metro bus and rail, LADOT Transit, Long Beach Transit, Torrance Transit), and Orange County (OCTA), work out how late each bus and train is against the published timetable, reconstruct when vehicles actually reached each stop, and turn that into hourly on-time and headway statistics you can explore by city, line, hour, and day of week.
+A backend service and website that watch live vehicle feeds for four places, Boston (MBTA), Los Angeles (LA Metro bus and rail), the LA municipal operators (LADOT Transit, Long Beach Transit, Torrance Transit), and Orange County (OCTA), work out how late each bus and train is against the published timetable, reconstruct when vehicles actually reached each stop, and turn that into hourly on-time and headway statistics you can explore by city, line, hour, and day of week.
 
 Status: milestones M0 through M5 are complete, plus the Linecheck website. See [docs/DESIGN.md](docs/DESIGN.md) for the full design, schema, and open items.
 
@@ -202,7 +202,7 @@ Every setting can be overridden with an environment variable of the same name. T
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+psycopg://transit:transit@localhost:5434/transit` | Database connection |
-| `ENABLED_REGIONS` | `["boston","los-angeles","orange-county"]` | Cities to follow |
+| `ENABLED_REGIONS` | `["boston","los-angeles","la-municipal","orange-county"]` | Cities to follow |
 | `POLL_INTERVAL_SECONDS` | `60` | How often live feeds are polled |
 | `ON_TIME_EARLY_SECONDS` / `ON_TIME_LATE_SECONDS` | `-60` / `300` | On-time window |
 | `SEVERITY_MAJOR_SECONDS` / `SEVERITY_SEVERE_SECONDS` | `600` / `1200` | Live severity cutoffs |

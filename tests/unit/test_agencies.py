@@ -11,15 +11,16 @@ def test_default_regions_and_agencies() -> None:
     assert [region.slug for region in enabled_regions(settings)] == [
         "boston",
         "los-angeles",
+        "la-municipal",
         "orange-county",
     ]
     assert [(a.slug, a.region, a.timezone) for a in enabled_agencies(settings)] == [
         ("mbta", "boston", "America/New_York"),
         ("lametro-bus", "los-angeles", "America/Los_Angeles"),
         ("lametro-rail", "los-angeles", "America/Los_Angeles"),
-        ("ladot", "los-angeles", "America/Los_Angeles"),
-        ("longbeach", "los-angeles", "America/Los_Angeles"),
-        ("torrance", "los-angeles", "America/Los_Angeles"),
+        ("ladot", "la-municipal", "America/Los_Angeles"),
+        ("longbeach", "la-municipal", "America/Los_Angeles"),
+        ("torrance", "la-municipal", "America/Los_Angeles"),
         ("octa", "orange-county", "America/Los_Angeles"),
     ]
 
@@ -73,7 +74,9 @@ def test_realtime_access_and_headers() -> None:
 def test_disabled_region_is_hidden() -> None:
     boston_only = Settings(_env_file=None, enabled_regions=["boston"])
     assert find_region(boston_only, "los-angeles") is None
+    assert find_region(boston_only, "la-municipal") is None
     assert find_agency(boston_only, "lametro-rail") is None
+    assert find_agency(boston_only, "torrance") is None
     assert find_agency(boston_only, "octa") is None
     assert find_agency(boston_only, "mbta") is not None
 

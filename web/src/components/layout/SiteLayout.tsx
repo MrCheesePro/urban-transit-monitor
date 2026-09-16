@@ -56,7 +56,7 @@ function SiteHeader() {
           </Link>
           {regions.length > 1 ? (
             <nav aria-label="City">
-              <ul className="flex rounded-sm border border-border">
+              <ul className="flex flex-wrap rounded-sm border border-border">
                 {regions.map((region) => {
                   const active = region.slug === current?.slug
                   return (

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # Which cities to follow (see app/core/agencies.py). In an environment variable this is a JSON
     # list, for example ENABLED_REGIONS='["boston"]'.
-    enabled_regions: list[str] = ["boston", "los-angeles", "orange-county"]
+    enabled_regions: list[str] = ["boston", "los-angeles", "la-municipal", "orange-county"]
 
     # Boston (MBTA). All feeds are open and need no key.
     mbta_vehicle_positions_url: str = "https://cdn.mbta.com/realtime/VehiclePositions.pb"

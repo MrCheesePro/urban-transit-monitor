@@ -17,9 +17,10 @@ export function MethodologyPage() {
       <Prose>
         <h2>Where the data comes from</h2>
         <p>
-          Linecheck covers three places: Boston, run by the MBTA; Los Angeles, where LA Metro bus and rail run
-          alongside LADOT Transit, Long Beach Transit and Torrance Transit; and Orange County, run by OCTA.
-          Each
+          Linecheck covers four places: Boston, run by the MBTA; Los Angeles, run by LA Metro bus and rail;
+          the LA municipal operators, which are the city-run services LADOT Transit, Long Beach Transit and
+          Torrance Transit; and Orange County, run by OCTA. The city-run operators are kept apart from LA
+          Metro so their much smaller networks are ranked against each other rather than against it. Each
           agency publishes two kinds of data. The <strong>timetable</strong> (GTFS) lists every trip and the
           time it is scheduled at each stop. The <strong>live feeds</strong> (GTFS-Realtime) report where each
           vehicle is and when it is predicted to reach its upcoming stops.
@@ -31,8 +32,8 @@ export function MethodologyPage() {
           operators are unaffected.
         </p>
         <p>
-          Every agency is processed on its own and in its own time zone, so hours and days for Los Angeles and
-          Orange County are Pacific time and for Boston are Eastern time.
+          Every agency is processed on its own and in its own time zone, so hours and days for every Los
+          Angeles area operator and for Orange County are Pacific time, and for Boston are Eastern time.
         </p>
 
         <h2>How the data is processed</h2>

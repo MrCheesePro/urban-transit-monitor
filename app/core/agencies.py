@@ -1,9 +1,11 @@
 """The transit agencies Linecheck follows, grouped into regions (cities), and where data lives.
 
 Every database table stores an `agency` slug, so the same route, trip, or stop id can exist in two
-agencies without colliding. A region is what the website shows as one city. LA Metro publishes its
-buses and its trains as two separate GTFS feeds, and several other operators run their own service
-in the same city, so the Los Angeles region holds five agencies.
+agencies without colliding. A region is what the website shows as one place. LA Metro publishes its
+buses and its trains as two separate GTFS feeds, so the Los Angeles region holds two agencies. The
+city-run operators of the Los Angeles area (LADOT, Long Beach Transit, and Torrance Transit) are a
+region of their own, so their much smaller networks are listed and ranked against each other rather
+than against LA Metro's.
 """
 
 from dataclasses import dataclass
@@ -78,11 +80,18 @@ _REGIONS = (
     Region(
         "los-angeles",
         "Los Angeles",
-        # The operator name is used in sentences such as "<operator> data from 4:12 PM", so a city
-        # served by several operators is named after the city rather than after one of them.
-        "Los Angeles transit",
+        "LA Metro",
         "America/Los_Angeles",
-        ("lametro-bus", "lametro-rail", "ladot", "longbeach", "torrance"),
+        ("lametro-bus", "lametro-rail"),
+    ),
+    Region(
+        "la-municipal",
+        "LA Municipal Operators",
+        # The operator name is used in sentences such as "<operator> data from 4:12 PM", so a region
+        # served by several operators is named after the group rather than after one of them.
+        "LA municipal transit",
+        "America/Los_Angeles",
+        ("ladot", "longbeach", "torrance"),
     ),
     Region("orange-county", "Orange County", "OCTA", "America/Los_Angeles", ("octa",)),
 )
@@ -131,7 +140,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
         ),
         "ladot": Agency(
             slug="ladot",
-            region="los-angeles",
+            region="la-municipal",
             name="LADOT Transit",
             timezone="America/Los_Angeles",
             static_gtfs_url=settings.ladot_static_gtfs_url,
@@ -143,7 +152,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
         ),
         "longbeach": Agency(
             slug="longbeach",
-            region="los-angeles",
+            region="la-municipal",
             name="Long Beach Transit",
             timezone="America/Los_Angeles",
             static_gtfs_url=settings.long_beach_static_gtfs_url,
@@ -155,7 +164,7 @@ def _all_agencies(settings: Settings) -> dict[str, Agency]:
         ),
         "torrance": Agency(
             slug="torrance",
-            region="los-angeles",
+            region="la-municipal",
             name="Torrance Transit",
             timezone="America/Los_Angeles",
             static_gtfs_url=settings.torrance_static_gtfs_url,
