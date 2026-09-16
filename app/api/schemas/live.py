@@ -36,8 +36,10 @@ class LiveSummaryOut(BaseModel):
     severity_counts: dict[str, int]
 
 
-# Response body for GET /api/v1/routes/{route_id}/live. as_of is when MBTA generated the latest
-# vehicle snapshot; stale is true when that is too old (or missing) to trust.
+# Response body for GET /api/v1/routes/{route_id}/live. as_of is when the agency generated the
+# latest vehicle snapshot; stale is true when that is too old (or missing) to trust.
+# vehicles_without_trip and agencies_without_predictions explain why vehicles lack a delay estimate
+# (see SystemLiveOut); for one route the agency list holds at most this route's own agency.
 class LiveRouteOut(BaseModel):
     agency: str
     route_id: str
@@ -48,5 +50,7 @@ class LiveRouteOut(BaseModel):
     as_of: dt.datetime | None
     data_age_seconds: int | None
     stale: bool
+    vehicles_without_trip: int
+    agencies_without_predictions: list[str]
     summary: LiveSummaryOut
     vehicles: list[LiveVehicleOut]

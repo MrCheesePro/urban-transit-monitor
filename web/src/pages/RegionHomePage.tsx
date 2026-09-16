@@ -7,6 +7,7 @@ import {
   ErrorPanel,
   Freshness,
   LoadingPanel,
+  NoEstimateNote,
   RealtimeNotConnected,
   RouteBadge,
   SectionTitle,
@@ -18,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import type { RankedRoute, Region, Route } from '@/lib/api'
 import { describeDelay, formatCount, formatPercent, modeName, routeName } from '@/lib/format'
 import { routeKey, useRankings, useRegionAlerts, useRegionLive, useRouteLookup } from '@/lib/queries'
-import { linePath, useRegion } from '@/lib/regions'
+import { agencyName, linePath, useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
 // Lines need at least this many observed arrivals in the past 24 hours to appear on this page.
@@ -125,6 +126,14 @@ export function RegionHomePage() {
                   </span>
                 </p>
                 <SeverityBar counts={live.data.summary.severity_counts} />
+                <NoEstimateNote
+                  vehicleCount={live.data.summary.vehicle_count}
+                  vehiclesWithDelay={live.data.summary.vehicles_with_delay}
+                  vehiclesWithoutTrip={live.data.vehicles_without_trip}
+                  operatorsWithoutPredictions={live.data.agencies_without_predictions.map((slug) =>
+                    agencyName(region, slug),
+                  )}
+                />
                 <Freshness
                   asOf={live.data.as_of}
                   ageSeconds={live.data.data_age_seconds}

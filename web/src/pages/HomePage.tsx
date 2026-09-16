@@ -6,6 +6,7 @@ import {
   ErrorPanel,
   Freshness,
   LoadingPanel,
+  NoEstimateNote,
   RealtimeNotConnected,
   SectionTitle,
   SeverityBar,
@@ -53,6 +54,14 @@ function CityCard({ region }: { region: Region }) {
               </span>
             </p>
             <SeverityBar counts={live.data.summary.severity_counts} />
+            <NoEstimateNote
+              vehicleCount={live.data.summary.vehicle_count}
+              vehiclesWithDelay={live.data.summary.vehicles_with_delay}
+              vehiclesWithoutTrip={live.data.vehicles_without_trip}
+              operatorsWithoutPredictions={live.data.agencies_without_predictions.map(
+                (slug) => region.agencies.find((item) => item.slug === slug)?.name ?? slug,
+              )}
+            />
             <Freshness
               asOf={live.data.as_of}
               ageSeconds={live.data.data_age_seconds}

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.models import RealtimeFeedState
-from app.gtfs.realtime import VEHICLE_POSITIONS_FEED
+from app.gtfs.realtime import TRIP_UPDATES_FEED, VEHICLE_POSITIONS_FEED
 
 
 # When the agency generated the stored vehicle snapshot being shown (as_of), how many seconds
@@ -19,6 +19,23 @@ class FeedFreshness:
     as_of: dt.datetime | None
     data_age_seconds: int | None
     stale: bool
+
+
+# Which of these agencies published no arrival predictions at all on the last poll. A delay is
+# predicted arrival minus scheduled arrival, so an agency publishing an empty trip updates feed
+# leaves every one of its vehicles without an estimate no matter how healthy everything else is.
+# Several agencies (OCTA, Torrance) stop publishing predictions overnight, which is why the live
+# pages say so rather than letting a screen full of "no estimate" look like a fault.
+def agencies_without_predictions(session: Session, agency_slugs: Sequence[str]) -> list[str]:
+    if not agency_slugs:
+        return []
+    rows = session.execute(
+        select(RealtimeFeedState.agency, RealtimeFeedState.entity_count).where(
+            RealtimeFeedState.feed == TRIP_UPDATES_FEED,
+            RealtimeFeedState.agency.in_(agency_slugs),
+        )
+    ).all()
+    return sorted(row.agency for row in rows if row.entity_count == 0)
 
 
 # Look up the freshness of the vehicle feeds of some agencies. With several agencies (LA Metro bus

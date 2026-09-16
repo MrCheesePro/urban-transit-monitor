@@ -17,11 +17,16 @@ class ModeSummaryOut(BaseModel):
 
 
 # Response body for GET /api/v1/system/live: every vehicle heard from recently, network-wide.
+# vehicles_without_trip and agencies_without_predictions explain why vehicles lack a delay estimate:
+# a vehicle on no scheduled trip (heading to or from a depot) cannot be compared with a timetable,
+# and an agency publishing no predictions leaves all of its vehicles unmeasurable.
 class SystemLiveOut(BaseModel):
     region: str
     realtime_configured: bool
     as_of: dt.datetime | None
     data_age_seconds: int | None
     stale: bool
+    vehicles_without_trip: int
+    agencies_without_predictions: list[str]
     summary: LiveSummaryOut
     modes: list[ModeSummaryOut]

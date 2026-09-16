@@ -9,7 +9,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_agency
-from app.api.freshness import vehicle_feed_freshness
+from app.api.freshness import agencies_without_predictions, vehicle_feed_freshness
 from app.api.schemas.live import LiveRouteOut, LiveSummaryOut, LiveVehicleOut
 from app.api.schemas.performance import HistoricalCellOut, HistoricalRouteOut, PerformanceOut
 from app.core.agencies import Agency
@@ -83,6 +83,12 @@ def live_route(
         as_of=freshness.as_of,
         data_age_seconds=freshness.data_age_seconds,
         stale=freshness.stale,
+        vehicles_without_trip=sum(vehicle.trip_id is None for vehicle in vehicles),
+        agencies_without_predictions=(
+            agencies_without_predictions(session, [agency.slug])
+            if agency.realtime_enabled
+            else []
+        ),
         summary=LiveSummaryOut.model_validate(summary, from_attributes=True),
         vehicles=[
             LiveVehicleOut(

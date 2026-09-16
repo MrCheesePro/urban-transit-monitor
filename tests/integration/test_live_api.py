@@ -97,6 +97,35 @@ def test_live_route(engine: Engine) -> None:
     }
 
 
+# A line's live view counts its vehicles that are on no scheduled trip and names its agency when no
+# predictions are being published, so the page can say why delays are missing rather than showing a
+# bare "no estimate" for every vehicle.
+def test_live_route_explains_missing_estimates(engine: Engine) -> None:
+    mbta = agency("mbta")
+    stamp = int(dt.datetime.now(dt.UTC).replace(microsecond=0).timestamp())
+    vehicles = [
+        {"id": "R-3", "route_id": "Red", "direction_id": 0, "timestamp": stamp},
+        {"id": "R-4", "trip_id": "red-1", "route_id": "Red", "direction_id": 1, "timestamp": stamp},
+    ]
+    feeds = {
+        mbta.vehicle_positions_url: vehicle_feed(stamp, vehicles),
+        mbta.trip_updates_url: trip_update_feed(stamp, []),
+    }
+    poll_once(engine, mbta, feeds.__getitem__)
+
+    body = client.get("/api/v1/agencies/mbta/routes/Red/live").json()
+    assert body["vehicles_without_trip"] == 1
+    assert body["agencies_without_predictions"] == ["mbta"]
+
+
+# With predictions flowing and every vehicle on a trip, there is nothing to explain.
+def test_live_route_reports_nothing_to_explain(engine: Engine) -> None:
+    _seed(engine)
+    body = client.get("/api/v1/agencies/mbta/routes/Red/live").json()
+    assert body["vehicles_without_trip"] == 0
+    assert body["agencies_without_predictions"] == []
+
+
 # ?direction_id= keeps only vehicles going that way.
 def test_live_route_direction_filter(engine: Engine) -> None:
     _seed(engine)

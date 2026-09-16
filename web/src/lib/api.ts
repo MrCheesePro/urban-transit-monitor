@@ -76,6 +76,8 @@ export interface LiveRoute {
   as_of: string | null
   data_age_seconds: number | null
   stale: boolean
+  vehicles_without_trip: number
+  agencies_without_predictions: string[]
   summary: FleetSummary
   vehicles: LiveVehicle[]
 }
@@ -94,6 +96,8 @@ export interface RegionLive {
   as_of: string | null
   data_age_seconds: number | null
   stale: boolean
+  vehicles_without_trip: number
+  agencies_without_predictions: string[]
   summary: FleetSummary
   modes: ModeSummary[]
 }

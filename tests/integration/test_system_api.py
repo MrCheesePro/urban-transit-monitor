@@ -66,6 +66,38 @@ def test_region_live(engine: Engine) -> None:
     ] == [(1, 1, "minor"), (3, 1, "unknown"), (None, 1, "unknown")]
 
 
+# The snapshot says why delay estimates are missing, so a page full of "no estimate" can explain
+# itself: vehicles on no scheduled trip (heading to or from a depot) are counted, and an agency
+# whose prediction feed came back empty is named. Several agencies stop publishing predictions
+# overnight, which is exactly this case.
+def test_region_live_explains_missing_estimates(engine: Engine) -> None:
+    mbta = agency("mbta")
+    stamp = int(dt.datetime.now(dt.UTC).replace(microsecond=0).timestamp())
+    vehicles = [
+        {"id": "P-1", "route_id": "1", "timestamp": stamp},
+        {"id": "P-2", "trip_id": "bus-1", "route_id": "1", "timestamp": stamp},
+    ]
+    feeds = {
+        mbta.vehicle_positions_url: vehicle_feed(stamp, vehicles),
+        mbta.trip_updates_url: trip_update_feed(stamp, []),
+    }
+    poll_once(engine, mbta, feeds.__getitem__)
+
+    body = client.get("/api/v1/regions/boston/live").json()
+    assert body["summary"]["vehicles_with_delay"] == 0
+    assert body["vehicles_without_trip"] == 1
+    assert body["agencies_without_predictions"] == ["mbta"]
+
+
+# When every vehicle is on a scheduled trip and the agency is publishing predictions, there is
+# nothing to explain and both fields stay empty.
+def test_region_live_reports_nothing_to_explain(engine: Engine) -> None:
+    seed(engine)
+    body = client.get("/api/v1/regions/boston/live").json()
+    assert body["agencies_without_predictions"] == []
+    assert body["vehicles_without_trip"] == 0
+
+
 # Vehicles not heard from recently are left out, and old data is flagged stale.
 def test_region_live_ignores_old_vehicles(engine: Engine) -> None:
     seed(engine, age_seconds=1000)

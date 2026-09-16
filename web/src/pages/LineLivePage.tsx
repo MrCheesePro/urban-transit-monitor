@@ -7,6 +7,7 @@ import {
   ErrorPanel,
   Freshness,
   LoadingPanel,
+  NoEstimateNote,
   RealtimeNotConnected,
   SectionTitle,
   SeverityBadge,
@@ -34,7 +35,7 @@ import {
   signedDelay,
 } from '@/lib/format'
 import { useLiveRoute, useRegionRoutes, useRouteAlerts, useRouteLookup } from '@/lib/queries'
-import { regionCenter, useRegion } from '@/lib/regions'
+import { agencyName, regionCenter, useRegion } from '@/lib/regions'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
 type DirectionChoice = 'both' | '0' | '1'
@@ -141,6 +142,17 @@ export function LineLivePage() {
               <StatTile
                 label="Line status"
                 value={<SeverityBadge severity={live.data.summary.severity} className="font-sans" />}
+              />
+            </div>
+
+            <div className="mt-3">
+              <NoEstimateNote
+                vehicleCount={live.data.summary.vehicle_count}
+                vehiclesWithDelay={live.data.summary.vehicles_with_delay}
+                vehiclesWithoutTrip={live.data.vehicles_without_trip}
+                operatorsWithoutPredictions={live.data.agencies_without_predictions.map((slug) =>
+                  agencyName(region, slug),
+                )}
               />
             </div>
 

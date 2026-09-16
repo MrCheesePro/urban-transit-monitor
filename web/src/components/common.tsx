@@ -166,6 +166,50 @@ export function Freshness({
   )
 }
 
+// Explains why some vehicles have no delay estimate, so a screen full of "No estimate" does not
+// look like a fault when it is normal service behaviour. Two different things cause it, and they
+// are worth telling apart: an agency that publishes no arrival predictions at all (several stop
+// overnight), and vehicles running on no scheduled trip, which usually means heading to or from a
+// depot. Anything left over is a trip the agency runs that is missing from the published timetable.
+// Renders nothing when every vehicle has an estimate.
+export function NoEstimateNote({
+  vehicleCount,
+  vehiclesWithDelay,
+  vehiclesWithoutTrip,
+  operatorsWithoutPredictions,
+}: {
+  vehicleCount: number
+  vehiclesWithDelay: number
+  vehiclesWithoutTrip: number
+  operatorsWithoutPredictions: string[]
+}) {
+  const missing = vehicleCount - vehiclesWithDelay
+  if (vehicleCount === 0 || missing <= 0) return null
+
+  const reasons: string[] = []
+  if (operatorsWithoutPredictions.length > 0) {
+    const names = operatorsWithoutPredictions.join(', ')
+    reasons.push(
+      `${names} ${operatorsWithoutPredictions.length === 1 ? 'is' : 'are'} not publishing arrival predictions right now`,
+    )
+  }
+  if (vehiclesWithoutTrip > 0) {
+    reasons.push(
+      `${formatCount(vehiclesWithoutTrip)} of ${formatCount(vehicleCount)} vehicles are not on a scheduled trip, which usually means heading to or from a depot`,
+    )
+  }
+  if (reasons.length === 0) {
+    reasons.push('their trips are not in the published timetable')
+  }
+
+  return (
+    <p className="text-sm text-muted-foreground">
+      {formatCount(missing)} of {formatCount(vehicleCount)} vehicles have no delay estimate:{' '}
+      {reasons.join(', and ')}.
+    </p>
+  )
+}
+
 // Shown in place of live figures for a city whose live feeds are not connected yet (LA Metro's feeds
 // need an API key). Explains what is missing and what still works.
 export function RealtimeNotConnected({ operator }: { operator: string }) {

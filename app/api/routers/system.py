@@ -7,7 +7,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_region
-from app.api.freshness import vehicle_feed_freshness
+from app.api.freshness import agencies_without_predictions, vehicle_feed_freshness
 from app.api.schemas.live import LiveSummaryOut
 from app.api.schemas.system import ModeSummaryOut, SystemLiveOut
 from app.core.agencies import Region, find_agency
@@ -33,7 +33,7 @@ def region_live(
     now = dt.datetime.now(dt.UTC)
     cutoff = now - dt.timedelta(seconds=settings.live_vehicle_max_age_seconds)
     rows = session.execute(
-        select(VehicleLatest.delay_seconds, Route.route_type)
+        select(VehicleLatest.delay_seconds, VehicleLatest.trip_id, Route.route_type)
         .outerjoin(
             Route,
             and_(Route.agency == VehicleLatest.agency, Route.route_id == VehicleLatest.route_id),
@@ -74,6 +74,8 @@ def region_live(
         as_of=freshness.as_of,
         data_age_seconds=freshness.data_age_seconds,
         stale=freshness.stale,
+        vehicles_without_trip=sum(row.trip_id is None for row in rows),
+        agencies_without_predictions=agencies_without_predictions(session, live_agencies),
         summary=LiveSummaryOut.model_validate(overall, from_attributes=True),
         modes=modes,
     )
