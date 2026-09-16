@@ -1,60 +1,18 @@
-import { Container, ErrorPanel, LoadingPanel, PageHeader, SectionTitle } from '@/components/common'
+import {
+  Container,
+  ErrorPanel,
+  JobMessage,
+  LoadingPanel,
+  PageHeader,
+  SectionTitle,
+} from '@/components/common'
+import { StatusNav } from '@/components/StatusNav'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import type { JobState } from '@/lib/api'
 import { formatAge, formatDuration, localDateTime, localTime } from '@/lib/format'
+import { JOB_DESCRIPTIONS, STATE_STYLES } from '@/lib/jobs'
 import { useHealth, useRegions } from '@/lib/queries'
 import { useDocumentTitle } from '@/lib/useDocumentTitle'
 import { cn } from '@/lib/utils'
-
-// What each background job does, in words a visitor understands. Every job except data cleanup runs
-// once per agency.
-const JOB_DESCRIPTIONS: Record<string, { name: string; description: string }> = {
-  poll_realtime: {
-    name: 'Live vehicle updates',
-    description: 'Downloads vehicle positions and predictions every minute.',
-  },
-  derive_stop_events: {
-    name: 'Stop arrival estimates',
-    description: 'Works out when vehicles reached each stop, every 5 minutes.',
-  },
-  aggregate_hourly: {
-    name: 'Hourly statistics',
-    description: 'Updates on-time and spacing figures at 15 minutes past each hour.',
-  },
-  load_static_gtfs: {
-    name: 'Timetable download',
-    description: 'Checks for a new timetable once a day.',
-  },
-  retention: {
-    name: 'Data cleanup',
-    description: 'Removes old records for every city once a day so storage stays bounded.',
-  },
-}
-
-const STATE_STYLES: Record<JobState, { label: string; className: string }> = {
-  ok: { label: 'Running', className: 'bg-severity-on-time' },
-  failing: { label: 'Failing', className: 'bg-severity-severe' },
-  stale: { label: 'Behind schedule', className: 'bg-severity-major' },
-  never_run: { label: 'Not run yet', className: 'bg-severity-unknown' },
-  not_configured: { label: 'Needs API key', className: 'bg-muted-foreground' },
-}
-
-// A job's last error kept short: only the first line (usually the error type and message) is shown,
-// and the full text, which can include long database queries, opens on request.
-function JobError({ error }: { error: string | null }) {
-  if (!error) return <span className="text-muted-foreground">None</span>
-  const firstLine = error.split('\n')[0]
-  const summary = firstLine.length > 140 ? `${firstLine.slice(0, 140)}...` : firstLine
-  if (summary === error) return <span className="font-mono">{error}</span>
-  return (
-    <details>
-      <summary className="cursor-pointer font-mono">{summary}</summary>
-      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-sm bg-muted p-2 font-mono">
-        {error}
-      </pre>
-    </details>
-  )
-}
 
 // The status page: whether the API can reach its database and whether each background job is
 // running on schedule for each agency, with the most recent error if a job is failing. Jobs that
@@ -75,6 +33,7 @@ export function StatusPage() {
         title="Service status"
         description="Whether Linecheck is collecting fresh transit data right now."
       />
+      <StatusNav />
       <div className="mt-8">
         {health.isPending ? (
           <LoadingPanel rows={5} label="Loading service status" />
@@ -138,6 +97,11 @@ export function StatusPage() {
                                 <span className={cn('size-2.5 rounded-[2px]', style.className)} aria-hidden="true" />
                                 {style.label}
                               </span>
+                              {job.last_status === 'partial' ? (
+                                <span className="block text-xs text-muted-foreground">
+                                  Last run finished with something missing
+                                </span>
+                              ) : null}
                             </TableCell>
                             <TableCell className="whitespace-nowrap">
                               {job.last_success_at ? (
@@ -153,7 +117,7 @@ export function StatusPage() {
                             </TableCell>
                             <TableCell className="whitespace-nowrap">{formatDuration(job.max_age_seconds)}</TableCell>
                             <TableCell className="max-w-80 whitespace-normal text-xs">
-                              <JobError error={job.last_error} />
+                              <JobMessage error={job.last_error} />
                             </TableCell>
                           </TableRow>
                         )

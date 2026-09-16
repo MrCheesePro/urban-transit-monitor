@@ -12,6 +12,15 @@ from app.core.config import Settings
 
 JobState = Literal["ok", "failing", "stale", "never_run", "not_configured"]
 
+# What one recorded run ended as, stored in ingest_runs.status:
+#   running      started and not finished (or the worker died before it could be closed out)
+#   success      did its work with nothing to report
+#   partial      did its work, but something was missing (a feed that published no predictions)
+#   failed       raised
+#   skipped      never ran, because another worker held the job's lock
+#   interrupted  was left "running" by a worker that stopped, and the retention job closed it out
+RunStatus = Literal["running", "success", "partial", "failed", "skipped", "interrupted"]
+
 # Jobs that need an agency's live feeds, in the order /health lists them for each agency.
 REALTIME_JOBS = ("poll_realtime", "poll_alerts", "derive_stop_events", "aggregate_hourly")
 
@@ -93,6 +102,10 @@ def expected_jobs(settings: Settings) -> list[ExpectedJob]:
 #   failing         the most recent finished run failed
 #   stale           no successful run within its max age (e.g. the worker is stopped)
 #   ok              otherwise
+# A "partial" run counts as a success here: it stored data, only something optional was missing, so
+# the service is not broken. It stays visible through last_status and last_error. An "interrupted"
+# run is not a failure either: it means the worker stopped, which already shows up as stale once its
+# max age passes, and one successful run clears it.
 def evaluate_job(
     expected: ExpectedJob, summary: JobRunSummary | None, now: dt.datetime
 ) -> JobHealth:

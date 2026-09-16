@@ -118,3 +118,59 @@ def test_old_rows_deleted(engine: Engine) -> None:
     assert result.total_removed == sum(result.rows_deleted.values()) + len(
         result.partitions_dropped
     )
+
+
+# A run left as "running" by a worker that stopped is closed out as interrupted, so the history can
+# tell a crashed run from one still in progress. A run that started recently is still in progress
+# and is left alone.
+def test_orphaned_running_row_is_marked_interrupted(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            insert(IngestRun),
+            [
+                {"job": "poll_realtime", "agency": "mbta", "status": "running",
+                 "started_at": NOW - dt.timedelta(hours=8)},
+                {"job": "poll_realtime", "agency": "octa", "status": "running",
+                 "started_at": NOW - dt.timedelta(minutes=2)},
+            ],
+        )
+
+    result = apply_retention(engine, get_settings(), now=NOW)
+
+    assert result.runs_interrupted >= 1
+    with engine.connect() as conn:
+        rows = dict(
+            conn.execute(
+                text(
+                    "SELECT agency, status FROM ingest_runs "
+                    "WHERE job = 'poll_realtime' AND agency IN ('mbta', 'octa')"
+                )
+            ).all()
+        )
+        finished = conn.execute(
+            text(
+                "SELECT finished_at FROM ingest_runs "
+                "WHERE job = 'poll_realtime' AND agency = 'mbta'"
+            )
+        ).scalar_one()
+    assert rows["mbta"] == "interrupted"
+    assert rows["octa"] == "running"
+    assert finished is not None
+
+
+# Reaping twice changes nothing the second time, so the daily job is safe to re-run.
+def test_reaping_orphans_is_idempotent(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            insert(IngestRun),
+            [
+                {"job": "aggregate_hourly", "agency": "mbta", "status": "running",
+                 "started_at": NOW - dt.timedelta(hours=9)}
+            ],
+        )
+
+    first = apply_retention(engine, get_settings(), now=NOW)
+    second = apply_retention(engine, get_settings(), now=NOW)
+
+    assert first.runs_interrupted >= 1
+    assert second.runs_interrupted == 0

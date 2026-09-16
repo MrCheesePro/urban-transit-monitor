@@ -25,32 +25,39 @@ Fetcher = Callable[[str], bytes]
 
 
 # Outcome of one poll: whether it was skipped as unchanged, how many vehicles were stored, and how
-# many of them got a delay estimate.
+# many of them got a delay estimate. trip_updates_error says why no predictions were available, when
+# the vehicle feed worked but the trip updates feed did not. The poll still stored vehicles, so it
+# is not a failure, but the job records it as partial so a broken feed cannot look healthy.
 @dataclass(frozen=True)
 class PollResult:
     skipped: bool
     vehicles: int
     with_delay: int
+    trip_updates_error: str | None = None
 
 
 # Download an agency's vehicle feed and trip update feed at the same time (two threads) so a slow
 # response does not double the poll. The vehicle feed is required and its errors propagate. Trip
 # updates are optional: if that download fails, vehicles are still stored, just without delays.
-def fetch_both(agency: Agency, fetch: Fetcher) -> tuple[bytes, bytes | None]:
+# Returns the reason alongside the bytes, so the caller can record the poll as partial instead of
+# swallowing the failure into a clean "success".
+def fetch_both(agency: Agency, fetch: Fetcher) -> tuple[bytes, bytes | None, str | None]:
     with ThreadPoolExecutor(max_workers=2) as pool:
         vehicles_future = pool.submit(fetch, agency.vehicle_positions_url)
         trips_future = pool.submit(fetch, agency.trip_updates_url)
         vehicle_bytes = vehicles_future.result()
+        trip_error: str | None = None
         try:
             trip_bytes: bytes | None = trips_future.result()
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "%s trip updates download failed; storing vehicles without delay",
                 agency.slug,
                 exc_info=True,
             )
             trip_bytes = None
-    return vehicle_bytes, trip_bytes
+            trip_error = f"Trip updates download failed, so no delay estimates: {exc}"
+    return vehicle_bytes, trip_bytes, trip_error
 
 
 _SCHEDULE_FOR_PAIRS_SQL = text(
@@ -188,7 +195,7 @@ def _store_vehicles(conn: Connection, rows: list[dict[str, Any]]) -> None:
 # 4. store history rows, update vehicle_latest, and record each feed's header timestamp.
 # All database writes happen in one transaction.
 def poll_once(engine: Engine, agency: Agency, fetch: Fetcher) -> PollResult:
-    vehicle_bytes, trip_bytes = fetch_both(agency, fetch)
+    vehicle_bytes, trip_bytes, trip_error = fetch_both(agency, fetch)
     vehicle_message = rt.decode_feed(vehicle_bytes)
     trip_message = None
     if trip_bytes is not None:
@@ -199,6 +206,7 @@ def poll_once(engine: Engine, agency: Agency, fetch: Fetcher) -> PollResult:
                 "%s trip updates feed could not be decoded; storing vehicles without delay",
                 agency.slug,
             )
+            trip_error = "Trip updates feed could not be decoded, so no delay estimates."
 
     header = rt.header_timestamp(vehicle_message)
     timezone = ZoneInfo(agency.timezone)
@@ -207,7 +215,9 @@ def poll_once(engine: Engine, agency: Agency, fetch: Fetcher) -> PollResult:
         previous = _previous_header(conn, agency.slug, rt.VEHICLE_POSITIONS_FEED)
         if header is not None and header == previous:
             logger.info("%s vehicle feed unchanged since %s, skipping", agency.slug, header)
-            return PollResult(skipped=True, vehicles=0, with_delay=0)
+            return PollResult(
+                skipped=True, vehicles=0, with_delay=0, trip_updates_error=trip_error
+            )
 
         vehicles = rt.latest_per_vehicle(rt.parse_vehicle_positions(vehicle_message))
         predictions = rt.parse_trip_updates(trip_message) if trip_message is not None else {}
@@ -235,4 +245,6 @@ def poll_once(engine: Engine, agency: Agency, fetch: Fetcher) -> PollResult:
     logger.info(
         "%s: stored %d vehicles (%d with delay estimates)", agency.slug, len(rows), with_delay
     )
-    return PollResult(skipped=False, vehicles=len(rows), with_delay=with_delay)
+    return PollResult(
+        skipped=False, vehicles=len(rows), with_delay=with_delay, trip_updates_error=trip_error
+    )

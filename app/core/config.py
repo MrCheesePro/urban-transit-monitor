@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     stop_events_retention_days: int = 90
     hourly_performance_retention_days: int = 400
     ingest_runs_retention_days: int = 30
+    # How long a job run may sit unfinished before the retention job decides the worker died and
+    # marks it interrupted. Well beyond the longest real run (a full timetable load takes minutes),
+    # so a slow run is never mislabelled.
+    orphaned_run_timeout_seconds: int = 21600
     vehicle_latest_retention_hours: int = 24
     retention_batch_size: int = 10000
     ranking_min_samples: int = 200

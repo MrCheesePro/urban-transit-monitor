@@ -15,6 +15,13 @@ def require_agency(agency: str) -> Agency:
     return found
 
 
+# Resolve an optional ?agency= filter to an enabled agency's slug, where leaving it out means every
+# agency. An unknown slug answers 404 rather than returning an empty list, so a typo is obvious
+# instead of looking like a quiet period with nothing recorded.
+def optional_agency(agency: str | None = None) -> str | None:
+    return None if agency is None else require_agency(agency).slug
+
+
 # Resolve the {region} path parameter to an enabled region, or answer 404.
 def require_region(region: str) -> Region:
     found = find_region(get_settings(), region)

@@ -15,6 +15,10 @@ router = APIRouter(tags=["health"])
 
 # For each job and agency: its most recent finished run and the finish time of its most recent
 # success. "IS NOT DISTINCT FROM" treats the empty agency of global jobs as a match.
+# Skipped runs are excluded from "most recent finished run" because a skip is not an outcome of the
+# work: counting one would let a skip that lands after a failure hide that failure. A partial run
+# counts as a success, because it stored data and only something optional was missing, so it must
+# not make the service look stale.
 _JOB_SUMMARY_SQL = text(
     """
     SELECT jobs.job, jobs.agency, latest.status, latest.finished_at, latest.error,
@@ -23,13 +27,13 @@ _JOB_SUMMARY_SQL = text(
     LEFT JOIN LATERAL (
         SELECT status, finished_at, error FROM ingest_runs AS runs
         WHERE runs.job = jobs.job AND runs.agency IS NOT DISTINCT FROM jobs.agency
-          AND runs.status <> 'running'
+          AND runs.status NOT IN ('running', 'skipped')
         ORDER BY runs.started_at DESC LIMIT 1
     ) AS latest ON true
     LEFT JOIN LATERAL (
         SELECT max(finished_at) AS last_success_at FROM ingest_runs AS runs
         WHERE runs.job = jobs.job AND runs.agency IS NOT DISTINCT FROM jobs.agency
-          AND runs.status = 'success'
+          AND runs.status IN ('success', 'partial')
     ) AS success ON true
     """
 )

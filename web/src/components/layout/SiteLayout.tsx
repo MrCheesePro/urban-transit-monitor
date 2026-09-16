@@ -157,6 +157,11 @@ function SiteFooter() {
               </Link>
             </li>
             <li>
+              <Link className="underline-offset-4 hover:underline" to="/status/history">
+                Run history
+              </Link>
+            </li>
+            <li>
               <a
                 className="underline-offset-4 hover:underline"
                 href={REPOSITORY_URL}

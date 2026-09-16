@@ -205,6 +205,86 @@ export interface Health {
   jobs: JobHealth[]
 }
 
+export type RunStatus = 'running' | 'success' | 'partial' | 'failed' | 'skipped' | 'interrupted'
+
+export interface JobRunGroup {
+  job: string
+  agency: string | null
+  run_count: number
+  success_count: number
+  partial_count: number
+  failed_count: number
+  skipped_count: number
+  interrupted_count: number
+  running_count: number
+  timed_run_count: number
+  success_rate: number | null
+  p50_duration_seconds: number | null
+  p90_duration_seconds: number | null
+  max_duration_seconds: number | null
+  rows_written: number
+  first_started_at: string | null
+  last_started_at: string | null
+  last_failure_at: string | null
+  last_error: string | null
+}
+
+export interface JobRunsSummary {
+  window_hours: number
+  period_start: string
+  period_end: string
+  jobs: JobRunGroup[]
+}
+
+export interface RunHour {
+  hour: string
+  run_count: number
+  success_count: number
+  partial_count: number
+  failed_count: number
+  skipped_count: number
+  interrupted_count: number
+}
+
+export interface JobRunHistory {
+  window_hours: number
+  period_start: string
+  period_end: string
+  hours: RunHour[]
+}
+
+export interface JobRun {
+  id: number
+  job: string
+  agency: string | null
+  status: RunStatus
+  started_at: string
+  finished_at: string | null
+  duration_seconds: number | null
+  rows: number | null
+  error: string | null
+}
+
+export interface JobRuns {
+  window_hours: number
+  period_start: string
+  period_end: string
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+  runs: JobRun[]
+}
+
+export interface JobRunsParams {
+  hours: number
+  job?: string
+  agency?: string
+  status?: RunStatus
+  limit?: number
+  offset?: number
+}
+
 type QueryValue = string | number | null | undefined
 
 // An API request that did not succeed. status is the HTTP status code, or 0 when the API could not
@@ -314,6 +394,33 @@ export const api = {
   // Alerts in force right now affecting one line, including the agency's service-wide ones.
   routeAlerts: (agency: string, routeId: string) =>
     getJson<Alerts>(`${routePath(agency, routeId)}/alerts`),
+
+  // How each background job has been doing over a window, grouped by job and agency.
+  jobSummary: (params: JobRunsParams) =>
+    getJson<JobRunsSummary>('/api/v1/jobs/summary', {
+      hours: params.hours,
+      job: params.job,
+      agency: params.agency,
+    }),
+
+  // How many job runs ended each way in every hour of a window, oldest first.
+  jobHistory: (params: JobRunsParams) =>
+    getJson<JobRunHistory>('/api/v1/jobs/history', {
+      hours: params.hours,
+      job: params.job,
+      agency: params.agency,
+    }),
+
+  // Individual job runs, newest first, for reading what actually happened.
+  jobRuns: (params: JobRunsParams) =>
+    getJson<JobRuns>('/api/v1/jobs/runs', {
+      hours: params.hours,
+      job: params.job,
+      agency: params.agency,
+      status: params.status,
+      limit: params.limit,
+      offset: params.offset,
+    }),
 
   // Database and background job health.
   health: () => getJson<Health>('/health'),

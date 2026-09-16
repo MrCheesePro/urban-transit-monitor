@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Literal
 
 from sqlalchemy import Engine, text
@@ -13,9 +14,29 @@ from app.pipeline import aggregate, retention, stop_events
 
 logger = logging.getLogger(__name__)
 
-JobStatus = Literal["success", "failed", "skipped"]
+JobStatus = Literal["success", "partial", "failed", "skipped"]
 
 MAX_ERROR_LENGTH = 2000
+
+
+# What a job did, when "it worked" is not the whole story. `note` explains what was missing from an
+# otherwise successful run, for example a poll that stored vehicles but could not fetch the agency's
+# arrival predictions. A run with a note is recorded as "partial" rather than "success", so a feed
+# that has quietly stopped working is visible instead of looking perfect.
+@dataclass(frozen=True)
+class JobOutcome:
+    rows: int
+    note: str | None = None
+
+
+# Accept either kind of return value from a job's work function: a plain row count for the ordinary
+# case, or a JobOutcome when the job has something to report. Notes are truncated like errors are,
+# because they are stored in the same column.
+def _as_outcome(result: int | JobOutcome) -> JobOutcome:
+    if isinstance(result, JobOutcome):
+        note = result.note[:MAX_ERROR_LENGTH] if result.note else None
+        return JobOutcome(rows=result.rows, note=note)
+    return JobOutcome(rows=result)
 
 
 # Run one background job safely. `work` does the actual job and returns how many rows it wrote.
@@ -26,7 +47,7 @@ MAX_ERROR_LENGTH = 2000
 # 2. Records the run in ingest_runs (status, row count, error text) for /health and debugging.
 # 3. Catches and logs any exception, so one failed run does not stop the scheduler.
 def run_job(
-    engine: Engine, name: str, work: Callable[[], int], agency: str | None = None
+    engine: Engine, name: str, work: Callable[[], int | JobOutcome], agency: str | None = None
 ) -> JobStatus:
     lock_name = job_id(name, agency)
     with engine.connect() as lock_conn:
@@ -36,6 +57,7 @@ def run_job(
         lock_conn.commit()
         if not acquired:
             logger.warning("job %s is already running elsewhere, skipping", lock_name)
+            _record_skipped(engine, name, agency)
             return "skipped"
         try:
             return _run_and_record(engine, name, agency, work)
@@ -46,9 +68,23 @@ def run_job(
             lock_conn.commit()
 
 
-# Insert a "running" ingest_runs row, run the work, then mark that row success or failed.
+# Record a run that never happened because another worker held the job's lock. The row is written
+# already finished, since there is nothing to wait for. Without it a job that never gets the lock
+# looks exactly like one running normally, which is the opposite of what the history is for.
+def _record_skipped(engine: Engine, name: str, agency: str | None) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO ingest_runs (job, agency, status, finished_at) "
+                "VALUES (:job, :agency, 'skipped', now())"
+            ),
+            {"job": name, "agency": agency},
+        )
+
+
+# Insert a "running" ingest_runs row, run the work, then mark that row success, partial or failed.
 def _run_and_record(
-    engine: Engine, name: str, agency: str | None, work: Callable[[], int]
+    engine: Engine, name: str, agency: str | None, work: Callable[[], int | JobOutcome]
 ) -> JobStatus:
     label = job_id(name, agency)
     with engine.begin() as conn:
@@ -60,15 +96,19 @@ def _run_and_record(
             {"job": name, "agency": agency},
         ).scalar_one()
     try:
-        rows = work()
+        outcome = _as_outcome(work())
     except Exception as exc:
         logger.exception("job %s failed", label)
         error = f"{type(exc).__name__}: {exc}"[:MAX_ERROR_LENGTH]
         _finish_run(engine, run_id, "failed", rows=None, error=error)
         return "failed"
-    _finish_run(engine, run_id, "success", rows=rows, error=None)
-    logger.info("job %s succeeded: %d rows", label, rows)
-    return "success"
+    status: JobStatus = "partial" if outcome.note else "success"
+    _finish_run(engine, run_id, status, rows=outcome.rows, error=outcome.note)
+    if outcome.note:
+        logger.info("job %s finished partially: %d rows (%s)", label, outcome.rows, outcome.note)
+    else:
+        logger.info("job %s succeeded: %d rows", label, outcome.rows)
+    return status
 
 
 # Close out an ingest_runs row with its final status, row count, error text, and finish time.
@@ -121,12 +161,13 @@ def poll_realtime_job(agency_slug: str) -> JobStatus:
     def fetch(url: str) -> bytes:
         return realtime.fetch_feed_bytes(url, settings.realtime_http_timeout_seconds, headers)
 
-    return run_job(
-        engine,
-        "poll_realtime",
-        lambda: realtime_ingest.poll_once(engine, agency, fetch).vehicles,
-        agency=agency_slug,
-    )
+    # Poll, and report a poll that stored vehicles without predictions as partial rather than
+    # success, so a broken trip updates feed does not hide behind a healthy vehicle feed.
+    def poll() -> JobOutcome:
+        result = realtime_ingest.poll_once(engine, agency, fetch)
+        return JobOutcome(rows=result.vehicles, note=result.trip_updates_error)
+
+    return run_job(engine, "poll_realtime", poll, agency=agency_slug)
 
 
 # Scheduled job (every ALERTS_POLL_INTERVAL_SECONDS): download one agency's service alerts and

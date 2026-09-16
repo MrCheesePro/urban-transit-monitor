@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import Engine, text
 
-from app.worker.jobs import run_job
+from app.worker.jobs import JobOutcome, run_job
 
 pytestmark = pytest.mark.integration
 
@@ -42,7 +42,9 @@ def test_failure_is_recorded(engine: Engine) -> None:
     assert run["error"] == "RuntimeError: feed unavailable"
 
 
-# If another connection holds the job's lock, the job is skipped and the work never runs.
+# If another connection holds the job's lock, the job is skipped and the work never runs. The skip
+# is recorded, already finished and with no row count, so a job that never gets the lock cannot look
+# like one running normally.
 def test_skips_when_lock_is_held(engine: Engine) -> None:
     calls: list[int] = []
     with engine.connect() as other:
@@ -51,6 +53,21 @@ def test_skips_when_lock_is_held(engine: Engine) -> None:
         other.execute(text("SELECT pg_advisory_unlock(hashtext('test_job_locked'))"))
     assert status == "skipped"
     assert calls == []
+    run = _latest_run(engine, "test_job_locked")
+    assert run["status"] == "skipped"
+    assert run["finished_at"] is not None
+    assert run["rows"] is None
+
+
+# A job that did its work but had something missing is recorded as partial, keeping its row count,
+# with the note in the error column. This is how a poll that stored vehicles without predictions
+# stays visible instead of being filed as a clean success.
+def test_partial_run_is_recorded_with_its_note(engine: Engine) -> None:
+    note = "Trip updates download failed, so no delay estimates"
+    status = run_job(engine, "test_job_partial", lambda: JobOutcome(rows=12, note=note))
+    assert status == "partial"
+    run = _latest_run(engine, "test_job_partial")
+    assert (run["status"], run["rows"], run["error"]) == ("partial", 12, note)
 
 
 # Locks are per agency: while the MBTA run of a job is locked, the same job still runs for LA

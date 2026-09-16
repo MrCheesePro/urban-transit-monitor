@@ -166,6 +166,24 @@ export function Freshness({
   )
 }
 
+// A job's error or note kept short: only the first line (usually the error type and message) is
+// shown, and the full text, which can include long database queries, opens on request. Shared by
+// the status page and the run history page.
+export function JobMessage({ error }: { error: string | null }) {
+  if (!error) return <span className="text-muted-foreground">None</span>
+  const firstLine = error.split('\n')[0]
+  const summary = firstLine.length > 140 ? `${firstLine.slice(0, 140)}...` : firstLine
+  if (summary === error) return <span className="font-mono">{error}</span>
+  return (
+    <details>
+      <summary className="cursor-pointer font-mono">{summary}</summary>
+      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-sm bg-muted p-2 font-mono">
+        {error}
+      </pre>
+    </details>
+  )
+}
+
 // Explains why some vehicles have no delay estimate, so a screen full of "No estimate" does not
 // look like a fault when it is normal service behaviour. Two different things cause it, and they
 // are worth telling apart: an agency that publishes no arrival predictions at all (several stop

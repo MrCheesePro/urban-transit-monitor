@@ -151,7 +151,7 @@ ingest_runs(id bigint PK, job text, started_at timestamptz, finished_at timestam
 | `derive_stop_events` | every 5 min | Trips with positions in the last 15 min: load their last 4 h of positions and timetable, estimate arrivals, upsert `stop_events`, recompute headways for the touched stops |
 | `aggregate_hourly` | startup + hourly at :15 | Recompute the last `AGGREGATE_LOOKBACK_HOURS` (3) complete hours from `stop_events`: delete and rewrite that window in one transaction |
 | `load_static_gtfs` | startup + daily 03:00 | Download zip, load in a transaction only if the version changed |
-| `retention` | startup + daily 04:00 | Create partitions for today and the next `PARTITION_DAYS_AHEAD` (3) days, drop partitions older than `RETENTION_DAYS` (14), batch-delete stop_events older than 90 days, hourly rows older than 400 days, ingest_runs older than 30 days, and vehicle_latest rows not seen for 24 hours |
+| `retention` | startup + daily 04:00 | Mark runs still "running" after `ORPHANED_RUN_TIMEOUT_SECONDS` (6 h) as `interrupted`, since a worker that died leaves them open forever. Then create partitions for today and the next `PARTITION_DAYS_AHEAD` (3) days, drop partitions older than `RETENTION_DAYS` (14), batch-delete stop_events older than 90 days, hourly rows older than 400 days, ingest_runs older than 30 days, and vehicle_latest rows not seen for 24 hours |
 
 Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and writes an `ingest_runs` row.
 
@@ -165,6 +165,9 @@ Every job takes `pg_try_advisory_lock(job_id)`, skips if already held, and write
 | `GET /agencies/{agency}/routes/{id}/live` and `/historical` | as `/routes/{id}/live` and `/historical` below, in the agency's time zone; 404 unknown agency |
 | `GET /regions/{region}/alerts` | service alerts in force now across the region's agencies, newest first, each with the agency's own cause, effect, text, and the routes it names; 404 unknown region |
 | `GET /agencies/{agency}/routes/{id}/alerts` | alerts in force now that name this route, plus the agency's service-wide alerts (which name no route); 404 unknown agency |
+| `GET /jobs/summary?hours=&job=&agency=` | one row per job and agency over the window: counts by outcome, `success_rate` (partial counts as success, skipped is excluded), p50/p90/max duration from `timed_run_count` finished runs, `rows_written`, and the most recent failure; `hours` 1-720, 404 unknown agency |
+| `GET /jobs/history?hours=&job=&agency=` | run counts per UTC hour, every hour in the window returned so "no runs recorded" is explicit rather than a gap |
+| `GET /jobs/runs?hours=&job=&agency=&status=&limit=&offset=` | individual runs newest first with `duration_seconds`, `rows`, and `error`, plus `total` and `has_more`; 422 for an unknown status |
 
 The rows below describe the behavior of each view; their original single-agency paths were replaced by the paths above.
 
@@ -218,6 +221,7 @@ A React single-page app in `web/`, served by nginx in Docker at `http://localhos
 | Rankings | `/{region}/rankings` | `/regions/{region}/rankings`, filters kept in the address bar |
 | Service news | `/{region}/service-news` | `/regions/{region}/alerts`: alerts in force now, newest first, with the agency's own cause and text. A shorter panel also appears on the city page, and a per-line one on each line's live page |
 | Status | `/status` | `/health` every 30 s, one row per job and agency |
+| Run history | `/status/history` | `/jobs/summary`, `/jobs/history`, and `/jobs/runs`: what each job has been doing, grouped by agency and job, an hour-by-hour timeline, and the individual runs with paging. Filters kept in the address bar; not refreshed on a timer, because a table that reshuffles while a reader pages through it is worse than a stale one |
 
 The header has a city switcher that keeps the reader in the same section (lines or rankings). Times on city pages are in that city's time zone. A city without connected live feeds shows a plain notice in place of live figures and rankings; its lines and timetables still work.
 | How it works, Privacy Policy, Terms & Conditions | `/how-it-works`, `/privacy`, `/terms` | static text |

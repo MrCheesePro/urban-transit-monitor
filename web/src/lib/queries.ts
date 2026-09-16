@@ -1,7 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
-import { api, type HistoricalParams, type RankingsParams, type Route } from '@/lib/api'
+import {
+  api,
+  type HistoricalParams,
+  type JobRunsParams,
+  type RankingsParams,
+  type Route,
+} from '@/lib/api'
 
 // Live data changes every minute on the server; pages showing it refresh this often.
 export const LIVE_REFRESH_MS = 30_000
@@ -91,6 +97,38 @@ export function useRouteAlerts(agency: string, routeId: string) {
     queryKey: ['route-alerts', agency, routeId],
     queryFn: () => api.routeAlerts(agency, routeId),
     refetchInterval: 2 * 60 * 1000,
+  })
+}
+
+// Job run history is not live data, and a table that reshuffles under the reader while they are
+// paging through it is worse than one that is a minute old, so these three are kept for a minute and
+// never refreshed on a timer.
+const HISTORY_STALE_MS = 60_000
+
+// How each background job has been doing over a window.
+export function useJobSummary(params: JobRunsParams) {
+  return useQuery({
+    queryKey: ['job-summary', params],
+    queryFn: () => api.jobSummary(params),
+    staleTime: HISTORY_STALE_MS,
+  })
+}
+
+// Job runs per hour over a window, for the timeline.
+export function useJobRunHistory(params: JobRunsParams) {
+  return useQuery({
+    queryKey: ['job-history', params],
+    queryFn: () => api.jobHistory(params),
+    staleTime: HISTORY_STALE_MS,
+  })
+}
+
+// One page of individual job runs.
+export function useJobRuns(params: JobRunsParams) {
+  return useQuery({
+    queryKey: ['job-runs', params],
+    queryFn: () => api.jobRuns(params),
+    staleTime: HISTORY_STALE_MS,
   })
 }
 

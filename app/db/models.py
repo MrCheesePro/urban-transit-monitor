@@ -19,6 +19,7 @@ from sqlalchemy import (
     SmallInteger,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -170,7 +171,19 @@ class FeedVersion(Base):
 # agency is empty for jobs that cover every agency at once (retention).
 class IngestRun(Base):
     __tablename__ = "ingest_runs"
-    __table_args__ = (Index("ix_ingest_runs_job_agency_started_at", "job", "agency", "started_at"),)
+    __table_args__ = (
+        Index("ix_ingest_runs_job_agency_started_at", "job", "agency", "started_at"),
+        # For the run history views: hour-by-hour counts and the newest-first list across all jobs.
+        # It also gives the retention delete an index for "started_at < cutoff", which it lacked.
+        Index("ix_ingest_runs_started_at", "started_at"),
+        # Failures only, so the index stays small however many runs succeed. Serves the failure list
+        # and each job's most recent error.
+        Index(
+            "ix_ingest_runs_failed_started_at",
+            "started_at",
+            postgresql_where=text("status = 'failed'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     job: Mapped[str]

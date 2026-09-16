@@ -96,6 +96,9 @@ A region is a city (`boston`, `los-angeles`); an agency is one timetable and set
 | `GET /api/v1/agencies/{agency}/routes/{route_id}/historical` | All 168 cells of a local day-of-week by hour-of-day grid, plus a period summary. Optional `direction_id`, `start_date`, `end_date`. |
 | `GET /api/v1/regions/{region}/alerts` | Service alerts the city's agencies have in force right now, newest first, with each alert's cause, effect, text, and affected lines. |
 | `GET /api/v1/agencies/{agency}/routes/{route_id}/alerts` | Alerts in force now affecting one line, including the agency's service-wide ones. |
+| `GET /api/v1/jobs/summary` | How each background job has been doing over a window, grouped by job and agency: run counts by outcome, success rate, duration percentiles, rows written, and the most recent failure. |
+| `GET /api/v1/jobs/history` | Run counts per hour over a window, with every hour returned so an hour with no runs is explicit. |
+| `GET /api/v1/jobs/runs` | Individual runs, newest first, filtered by job, agency, and outcome, with paging and a total. |
 | `GET /health` | Database status and the state of every background job per agency (ok, failing, stale, never_run, or not_configured when an API key is missing). |
 
 Interactive documentation is served at `http://localhost:8000/docs`.

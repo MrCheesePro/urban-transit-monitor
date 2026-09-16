@@ -12,6 +12,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 import { PrivacyPage } from '@/pages/PrivacyPage'
 import { RankingsPage } from '@/pages/RankingsPage'
 import { RegionHomePage } from '@/pages/RegionHomePage'
+import { RunHistoryPage } from '@/pages/RunHistoryPage'
 import { StatusPage } from '@/pages/StatusPage'
 import { TermsPage } from '@/pages/TermsPage'
 
@@ -25,6 +26,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <HomePage /> },
       { path: 'status', element: <StatusPage /> },
+      { path: 'status/history', element: <RunHistoryPage /> },
       { path: 'how-it-works', element: <MethodologyPage /> },
       { path: 'privacy', element: <PrivacyPage /> },
       { path: 'terms', element: <TermsPage /> },

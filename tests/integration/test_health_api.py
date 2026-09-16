@@ -93,6 +93,34 @@ def test_health_degraded_with_failing_and_stale_jobs(engine: Engine) -> None:
     assert states[("retention", None)]["state"] == "ok"
 
 
+# A skipped run is not an outcome of the work, so it must not become the "latest result". Without
+# this a skip landing after a failure would quietly clear the failure from the status page.
+def test_skipped_run_does_not_hide_the_last_failure(engine: Engine) -> None:
+    record_all_recent(engine, skip=frozenset({("poll_realtime", "mbta")}))
+    record_run(engine, "poll_realtime", "mbta", "failed", 30, error="ConnectError: timed out")
+    record_run(engine, "poll_realtime", "mbta", "skipped", 5)
+
+    poll = job_states(client.get("/health").json())[("poll_realtime", "mbta")]
+    assert (poll["state"], poll["last_status"]) == ("failing", "failed")
+    assert poll["last_error"] == "ConnectError: timed out"
+
+
+# A partial run stored its data, so it counts as a success: the service is not degraded and the job
+# does not go stale. What was missing stays visible through last_status and last_error.
+def test_partial_run_counts_as_a_success(engine: Engine) -> None:
+    record_all_recent(engine, skip=frozenset({("poll_realtime", "mbta")}))
+    record_run(
+        engine, "poll_realtime", "mbta", "partial", 10, error="Trip updates download failed"
+    )
+
+    body = client.get("/health").json()
+    poll = job_states(body)[("poll_realtime", "mbta")]
+    assert body["status"] == "ok"
+    assert (poll["state"], poll["last_status"]) == ("ok", "partial")
+    assert poll["last_error"] == "Trip updates download failed"
+    assert isinstance(poll["seconds_since_success"], int)
+
+
 # A run still in progress is ignored when judging the latest finished run.
 def test_running_job_does_not_hide_last_result(engine: Engine) -> None:
     record_all_recent(engine)

@@ -24,11 +24,29 @@ class RetentionResult:
     partitions_ensured: int
     partitions_dropped: tuple[str, ...]
     rows_deleted: dict[str, int]
+    runs_interrupted: int = 0
 
     # Rows deleted plus partitions dropped: the number recorded for the run in ingest_runs.
     @property
     def total_removed(self) -> int:
         return sum(self.rows_deleted.values()) + len(self.partitions_dropped)
+
+
+# Close out job runs left as "running" by a worker that stopped before finishing them. Nothing else
+# ever clears those rows, so without this they stay "running" forever and the run history cannot
+# tell a crashed run from one still in progress. Runs younger than the timeout are left alone, and
+# running this twice changes nothing the second time. Returns how many were closed.
+def reap_orphaned_runs(engine: Engine, settings: Settings, now: dt.datetime) -> int:
+    cutoff = now - dt.timedelta(seconds=settings.orphaned_run_timeout_seconds)
+    with engine.begin() as conn:
+        return conn.execute(
+            text(
+                "UPDATE ingest_runs SET status = 'interrupted', finished_at = now(), "
+                "error = 'Interrupted: the worker stopped before this run finished.' "
+                "WHERE status = 'running' AND started_at < :cutoff"
+            ),
+            {"cutoff": cutoff},
+        ).rowcount
 
 
 # Delete rows whose `column` is older than `cutoff` from `table`, `batch_size` rows at a time, each
@@ -61,6 +79,7 @@ def apply_retention(
     engine: Engine, settings: Settings, now: dt.datetime | None = None
 ) -> RetentionResult:
     now = now or dt.datetime.now(dt.UTC)
+    runs_interrupted = reap_orphaned_runs(engine, settings, now)
     upcoming = upcoming_partition_times(now, settings.partition_days_ahead)
     with engine.begin() as conn:
         ensure_partitions(conn, upcoming)
@@ -84,13 +103,15 @@ def apply_retention(
     }
 
     logger.info(
-        "retention: ensured %d partitions, dropped %s, deleted rows %s",
+        "retention: ensured %d partitions, dropped %s, deleted rows %s, interrupted %d stale runs",
         len(upcoming),
         expired or "none",
         rows_deleted,
+        runs_interrupted,
     )
     return RetentionResult(
         partitions_ensured=len(upcoming),
         partitions_dropped=tuple(expired),
         rows_deleted=rows_deleted,
+        runs_interrupted=runs_interrupted,
     )
