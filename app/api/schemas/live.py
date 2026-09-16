@@ -26,6 +26,14 @@ class LiveVehicleOut(BaseModel):
     feed_timestamp: dt.datetime
 
 
+# One direction of a route with the name riders know it by, for example "Outbound to Harvard Square"
+# or "ARTESIA STATION". Only directions the agency names in some way appear; anything missing is
+# shown as "Direction 0" or "Direction 1".
+class DirectionOut(BaseModel):
+    direction_id: int
+    label: str
+
+
 # Route-level roll-up of the live fleet (see app/metrics/delay.py summarize_fleet).
 class LiveSummaryOut(BaseModel):
     vehicle_count: int
@@ -52,5 +60,6 @@ class LiveRouteOut(BaseModel):
     stale: bool
     vehicles_without_trip: int
     agencies_without_predictions: list[str]
+    directions: list[DirectionOut]
     summary: LiveSummaryOut
     vehicles: list[LiveVehicleOut]

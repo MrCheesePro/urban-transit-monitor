@@ -187,7 +187,9 @@ The rows below describe the behavior of each view; their original single-agency 
 - Never call live agency endpoints in tests.
 
 ## Milestones
-All of M0 through M5 are complete.
+All of M0 through M5 are complete, plus the Linecheck website, multi-agency and multi-region support
+(Boston, Los Angeles, the LA municipal operators, Orange County), service alerts, and deployment to a
+public server.
 
 - **M0** Scaffold: pyproject (uv), docker-compose, config, Alembic, CI (ruff, mypy, pytest).
 - **M1** Static GTFS loader, `GET /routes`.
@@ -199,9 +201,9 @@ All of M0 through M5 are complete.
 ## Open items
 - Record CANCELED trips from trip updates so cancellations can be counted per hour.
 - ADDED trips (common on MBTA subway) have no timetable, so they get no delay and no stop events. Headway for them could be measured from vehicle positions alone.
-- Direction names: `directions.txt` (for example "Inbound" and "Outbound") is not loaded, so the website says "Direction 0" and "Direction 1".
-- Deployment to a custom domain. The website currently runs locally only.
-- LA Metro live feeds: the Swiftly paths and the key header follow Swiftly's documented pattern but are unverified until a real key is configured (every probe without a key returned 401).
+- LA Metro publishes neither `directions.txt` nor any `trip_headsign`, so its lines still show "Direction 0" and "Direction 1" while every other agency is named.
+- Torrance Transit's timetable host blocks data centre IP addresses, so the nightly `load_static_gtfs:torrance` job fails on the deployed server (403) and its timetable is loaded by hand there. `/health` reports that job as failing, which is accurate. The permanent fix is for the agency to allow the server's address.
+- Alerts are replaced on every poll, so withdrawn ones are not kept. Keeping them would allow joining causes (crashes, police activity) against the delay figures for the same hours.
 
 ## Website (Linecheck)
 A React single-page app in `web/`, served by nginx in Docker at `http://localhost:8080` (or by Vite at `:5173` during development). nginx forwards `/api` and `/health` to the api container, so the browser only ever talks to one origin and the API needs no CORS setup.
@@ -214,6 +216,7 @@ A React single-page app in `web/`, served by nginx in Docker at `http://localhos
 | Line live | `/{region}/lines/{agency}/{id}` | `/agencies/{agency}/routes/{id}/live` every 30 s: map, vehicle table with stop names, summary |
 | Line history | `/{region}/lines/{agency}/{id}/history` | `/agencies/{agency}/routes/{id}/historical`: period totals and the weekly day-by-hour grid |
 | Rankings | `/{region}/rankings` | `/regions/{region}/rankings`, filters kept in the address bar |
+| Service news | `/{region}/service-news` | `/regions/{region}/alerts`: alerts in force now, newest first, with the agency's own cause and text. A shorter panel also appears on the city page, and a per-line one on each line's live page |
 | Status | `/status` | `/health` every 30 s, one row per job and agency |
 
 The header has a city switcher that keeps the reader in the same section (lines or rankings). Times on city pages are in that city's time zone. A city without connected live feeds shows a plain notice in place of live figures and rankings; its lines and timetables still work.

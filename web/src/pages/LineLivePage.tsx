@@ -28,6 +28,7 @@ import { VehicleMap } from '@/components/VehicleMap'
 import type { LiveVehicle } from '@/lib/api'
 import {
   describeDelay,
+  directionName,
   formatAge,
   formatCount,
   routeName,
@@ -91,8 +92,8 @@ export function LineLivePage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="both">Both directions</SelectItem>
-                <SelectItem value="0">Direction 0</SelectItem>
-                <SelectItem value="1">Direction 1</SelectItem>
+                <SelectItem value="0">{directionName(live.data?.directions, 0)}</SelectItem>
+                <SelectItem value="1">{directionName(live.data?.directions, 1)}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -198,7 +199,7 @@ export function LineLivePage() {
                           <TableRow key={vehicle.vehicle_id}>
                             <TableCell className="font-mono">{vehicle.label ?? vehicle.vehicle_id}</TableCell>
                             <TableCell>
-                              {vehicle.direction_id === null ? 'Unknown' : `Direction ${vehicle.direction_id}`}
+                              {directionName(live.data.directions, vehicle.direction_id)}
                             </TableCell>
                             <TableCell>{positionText(vehicle)}</TableCell>
                             <TableCell className="text-right font-mono">

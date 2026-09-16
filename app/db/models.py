@@ -69,6 +69,23 @@ class Trip(Base):
     shape_id: Mapped[str | None]
 
 
+# What an agency calls each direction of a route, from the optional directions.txt file. The MBTA
+# publishes both a name and a destination ("Outbound" to "Harvard Square"); LADOT publishes only a
+# name ("Clockwise"). Agencies that publish no such file have no rows here, and the website falls
+# back to the most common trip headsign, then to "Direction 0" and "Direction 1".
+class RouteDirection(Base):
+    __tablename__ = "route_directions"
+    __table_args__ = (
+        PrimaryKeyConstraint("agency", "route_id", "direction_id", name="pk_route_directions"),
+    )
+
+    agency: Mapped[str]
+    route_id: Mapped[str]
+    direction_id: Mapped[int] = mapped_column(SmallInteger)
+    direction: Mapped[str | None]
+    destination: Mapped[str | None]
+
+
 # A place where vehicles stop. location_type 0 is a boarding platform or bus stop,
 # 1 is a parent station that groups platforms (parent_station points at it).
 class Stop(Base):

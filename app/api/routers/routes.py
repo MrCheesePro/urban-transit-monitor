@@ -9,8 +9,9 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_agency
+from app.api.directions import direction_labels
 from app.api.freshness import agencies_without_predictions, vehicle_feed_freshness
-from app.api.schemas.live import LiveRouteOut, LiveSummaryOut, LiveVehicleOut
+from app.api.schemas.live import DirectionOut, LiveRouteOut, LiveSummaryOut, LiveVehicleOut
 from app.api.schemas.performance import HistoricalCellOut, HistoricalRouteOut, PerformanceOut
 from app.core.agencies import Agency
 from app.core.config import get_settings
@@ -89,6 +90,10 @@ def live_route(
             if agency.realtime_enabled
             else []
         ),
+        directions=[
+            DirectionOut(direction_id=direction, label=label)
+            for direction, label in sorted(direction_labels(session, agency.slug, route_id).items())
+        ],
         summary=LiveSummaryOut.model_validate(summary, from_attributes=True),
         vehicles=[
             LiveVehicleOut(
@@ -176,6 +181,10 @@ def historical_route(
         start_date=first_day,
         end_date=last_day,
         timezone=agency.timezone,
+        directions=[
+            DirectionOut(direction_id=direction, label=label)
+            for direction, label in sorted(direction_labels(session, agency.slug, route_id).items())
+        ],
         summary=PerformanceOut(**asdict(combine_hours(hours))),
         cells=[
             HistoricalCellOut(

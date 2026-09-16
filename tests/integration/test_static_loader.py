@@ -11,6 +11,8 @@ pytestmark = pytest.mark.integration
 
 EXPECTED_COUNTS = {
     "routes": 2,
+    # The fixture feed publishes no directions.txt, so the optional table stays empty.
+    "route_directions": 0,
     "trips": 5,
     "stops": 5,
     "stop_times": 11,

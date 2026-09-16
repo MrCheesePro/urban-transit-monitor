@@ -80,6 +80,19 @@ export function alertEffect(effect: string | null | undefined): string | null {
   return effect ? (ALERT_EFFECTS[effect] ?? null) : null
 }
 
+// The name riders know one direction of a line by, for example "Outbound to Harvard Square" or
+// "ARTESIA STATION". Falls back to "Direction 0" or "Direction 1" for an agency that names its
+// directions nowhere (LA Metro publishes neither a directions file nor headsigns), and to "Unknown"
+// for a vehicle whose feed gave no direction at all.
+export function directionName(
+  directions: { direction_id: number; label: string }[] | undefined,
+  directionId: number | null | undefined,
+): string {
+  if (directionId === null || directionId === undefined) return 'Unknown'
+  const named = directions?.find((direction) => direction.direction_id === directionId)
+  return named ? named.label : `Direction ${directionId}`
+}
+
 // Name of a mode of transport from its GTFS route_type, for example 3 gives "Bus".
 export function modeName(routeType: number | null | undefined): string {
   if (routeType === null || routeType === undefined) return 'Other service'

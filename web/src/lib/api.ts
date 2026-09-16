@@ -66,6 +66,11 @@ export interface LiveVehicle {
   feed_timestamp: string
 }
 
+export interface Direction {
+  direction_id: number
+  label: string
+}
+
 export interface LiveRoute {
   agency: string
   route_id: string
@@ -78,6 +83,7 @@ export interface LiveRoute {
   stale: boolean
   vehicles_without_trip: number
   agencies_without_predictions: string[]
+  directions: Direction[]
   summary: FleetSummary
   vehicles: LiveVehicle[]
 }
@@ -129,6 +135,7 @@ export interface HistoricalRoute {
   start_date: string
   end_date: string
   timezone: string
+  directions: Direction[]
   summary: Performance
   cells: HistoricalCell[]
 }

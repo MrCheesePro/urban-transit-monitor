@@ -22,6 +22,7 @@ import {
 import { WeeklyGrid } from '@/components/WeeklyGrid'
 import {
   describeDelay,
+  directionName,
   formatCount,
   formatCv,
   formatDuration,
@@ -95,8 +96,8 @@ export function LineHistoryPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="both">Both directions</SelectItem>
-              <SelectItem value="0">Direction 0</SelectItem>
-              <SelectItem value="1">Direction 1</SelectItem>
+              <SelectItem value="0">{directionName(history.data?.directions, 0)}</SelectItem>
+              <SelectItem value="1">{directionName(history.data?.directions, 1)}</SelectItem>
             </SelectContent>
           </Select>
         </div>

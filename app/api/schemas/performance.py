@@ -2,6 +2,7 @@ import datetime as dt
 
 from pydantic import BaseModel
 
+from app.api.schemas.live import DirectionOut
 from app.metrics.aggregate import RankingMetric
 
 
@@ -38,6 +39,7 @@ class HistoricalRouteOut(BaseModel):
     start_date: dt.date
     end_date: dt.date
     timezone: str
+    directions: list[DirectionOut]
     summary: PerformanceOut
     cells: list[HistoricalCellOut]
 

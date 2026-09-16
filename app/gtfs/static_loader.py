@@ -58,6 +58,20 @@ TABLE_SPECS: tuple[TableSpec, ...] = (
             ("route_text_color", "route_text_color", p.optional_text),
         ),
     ),
+    # Optional, and not part of the GTFS standard, but several agencies publish it (the MBTA with a
+    # destination, LADOT without). It is what lets the site say "Outbound to Harvard Square" instead
+    # of "Direction 0".
+    TableSpec(
+        "directions.txt",
+        "route_directions",
+        (
+            ("route_id", "route_id", p.required_text),
+            ("direction_id", "direction_id", p.required_int),
+            ("direction", "direction", p.optional_text),
+            ("direction_destination", "destination", p.optional_text),
+        ),
+        required=False,
+    ),
     TableSpec(
         "trips.txt",
         "trips",
